@@ -1,11 +1,10 @@
+import { ortbConverter } from '../libraries/ortbConverter/converter.js';
 import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { BANNER, VIDEO, NATIVE } from '../src/mediaTypes.js';
 import { replaceAuctionPrice } from '../src/utils.js';
-import { BANNER, VIDEO, NATIVE } from 'src/mediaTypes.js';
-import { ortbConverter} from '../libraries/ortbConverter/converter.js'
 
 const BIDDER_CODE = 'mobkoi';
 const AD_SERVER_ENDPOINT = 'http://127.0.0.1:8000/bid';
-
 const DEFAULT_CURRENCY = 'USD';
 
 const converter = ortbConverter({
@@ -71,11 +70,14 @@ export const spec = {
   },
 
   buildRequests: function (validBidRequests, bidderRequest) {
-    const data = converter.toORTB({ validBidRequests, bidderRequest });
+    const ortb = converter.toORTB({ validBidRequests, bidderRequest });
     return {
       method: 'POST',
       url: AD_SERVER_ENDPOINT,
-      data: data,
+      data: {
+        ortb,
+        bidderRequest
+      },
       options: {
         withCredentials: false,
       }
@@ -84,21 +86,15 @@ export const spec = {
 
   interpretResponse: function (serverResponse, bidRequest) {
     if (!serverResponse.body) return [];
-    const parsedSeatbid = serverResponse.body.seatbid.map(seatbidItem => {
-      const parsedBid = seatbidItem.bid.map((bidItem) => ({
-        ...bidItem,
-        adm: replaceAuctionPrice(bidItem.adm, bidItem.price),
-        nurl: replaceAuctionPrice(bidItem.nurl, bidItem.price)
-      }));
-      return {...seatbidItem, bid: parsedBid};
+
+    const responseBody = {...serverResponse.body, seatbid: serverResponse.body.seatbid};
+    const prebidBidResponse = converter.fromORTB({
+      response: responseBody,
+      request: bidRequest.data.ortb,
     });
 
-    const responseBody = {...serverResponse.body, seatbid: parsedSeatbid};
-    const bids = converter.fromORTB({
-      response: responseBody,
-      request: bidRequest.data,
-    }).bids;
-    return bids;
+    console.log({ serverResponse, bidRequest, prebidBidResponse });
+    return prebidBidResponse.bids;
   },
 
 };
