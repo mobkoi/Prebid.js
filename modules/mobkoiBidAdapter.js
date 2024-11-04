@@ -1,11 +1,9 @@
 import { ortbConverter } from '../libraries/ortbConverter/converter.js';
 import { registerBidder } from '../src/adapters/bidderFactory.js';
-import { BANNER, VIDEO, NATIVE } from '../src/mediaTypes.js';
-import { replaceAuctionPrice } from '../src/utils.js';
+import { BANNER } from '../src/mediaTypes.js';
 
 const BIDDER_CODE = 'mobkoi';
 const AD_SERVER_ENDPOINT = 'http://127.0.0.1:8000/bid';
-const DEFAULT_CURRENCY = 'USD';
 
 const converter = ortbConverter({
   context: {
@@ -47,7 +45,7 @@ const converter = ortbConverter({
 
 export const spec = {
   code: BIDDER_CODE,
-  supportedMediaTypes: [BANNER, VIDEO, NATIVE],
+  supportedMediaTypes: [BANNER],
 
   isBidRequestValid: function (bid) {
     return true;
