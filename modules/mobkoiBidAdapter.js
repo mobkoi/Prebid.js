@@ -3,41 +3,18 @@ import { registerBidder } from '../src/adapters/bidderFactory.js';
 import { BANNER } from '../src/mediaTypes.js';
 
 const BIDDER_CODE = 'mobkoi';
-const AD_SERVER_ENDPOINT = 'http://127.0.0.1:8000/bid';
+const DEFAULT_BIDDING_ENDPOINT = 'https://adserver.mobkoi.com/bid';
+
+const getBidServerEndpoint = (bidRequest) => {
+  return bidRequest.params.bidingEndpoint || DEFAULT_BIDDING_ENDPOINT;
+}
 
 const converter = ortbConverter({
   context: {
     netRevenue: true,
     ttl: 30,
   },
-  // imp(buildImp, bidRequest, context) {
-  //   const imp = buildImp(bidRequest, context);
-  //   if (!imp.bidfloor) {
-  //     imp.bidfloor = bidRequest.params.bidfloor || 0;
-  //     imp.bidfloorcur = bidRequest.params.currency || DEFAULT_CURRENCY;
-  //   }
-  //   if (bidRequest.params.battr) {
-  //     Object.keys(bidRequest.mediaTypes).forEach(mType => {
-  //       imp[mType].battr = bidRequest.params.battr;
-  //     })
-  //   }
-  //   return imp;
-  // },
-  // request(buildRequest, imps, bidderRequest, context) {
-  //   const request = buildRequest(imps, bidderRequest, context);
-  //   const bid = context.bidRequests[0];
-  //   if (!request.cur) {
-  //     request.cur = [bid.params.currency || DEFAULT_CURRENCY];
-  //   }
-  //   if (bid.params.bcat) {
-  //     request.bcat = bid.params.bcat;
-  //   }
-  //   return request;
-  // },
   bidResponse(buildBidResponse, bid, context) {
-    // eslint-disable-next-line no-console
-    console.log({ context, bid });
-
     const bidResponse = buildBidResponse(bid, context);
     return bidResponse;
   }
@@ -52,18 +29,17 @@ export const spec = {
   },
 
   buildRequests: function (validBidRequests, bidderRequest) {
-    const ortb = converter.toORTB({ validBidRequests, bidderRequest });
-    return {
-      method: 'POST',
-      url: AD_SERVER_ENDPOINT,
-      data: {
-        ortb,
-        bidderRequest
-      },
-      options: {
-        withCredentials: false,
-      }
-    };
+    return validBidRequests.map(currentBidRequest => {
+      const biddingEndpoint = getBidServerEndpoint(currentBidRequest)
+      return {
+        method: 'POST',
+        url: biddingEndpoint,
+        data: {
+          ortb: converter.toORTB({ bidRequests: [currentBidRequest], bidderRequest }),
+          bidParams: currentBidRequest.params,
+        },
+      };
+    });
   },
 
   interpretResponse: function (serverResponse, bidRequest) {
@@ -75,6 +51,7 @@ export const spec = {
       response: responseBody,
     });
 
+    // eslint-disable-next-line no-console
     console.log({ serverResponse, bidRequest, prebidBidResponse });
     return prebidBidResponse.bids;
   },
