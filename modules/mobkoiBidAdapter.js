@@ -4,9 +4,10 @@ import { BANNER } from '../src/mediaTypes.js';
 
 const BIDDER_CODE = 'mobkoi';
 const DEFAULT_BIDDING_ENDPOINT = 'https://adserver.mobkoi.com/bid';
+const PARAMS_BIDING_ENDPOINT = 'bidingEndpoint';
 
 const getBidServerEndpoint = (bidRequest) => {
-  return bidRequest.params.bidingEndpoint || DEFAULT_BIDDING_ENDPOINT;
+  return bidRequest.params[PARAMS_BIDING_ENDPOINT] || DEFAULT_BIDDING_ENDPOINT;
 }
 
 const converter = ortbConverter({
@@ -31,12 +32,14 @@ export const spec = {
   buildRequests: function (validBidRequests, bidderRequest) {
     return validBidRequests.map(currentBidRequest => {
       const biddingEndpoint = getBidServerEndpoint(currentBidRequest)
+      // Omit biding endpoint from bidParams
+      const { [PARAMS_BIDING_ENDPOINT]: _, ...filteredParams } = currentBidRequest.params;
       return {
         method: 'POST',
         url: biddingEndpoint,
         data: {
           ortb: converter.toORTB({ bidRequests: [currentBidRequest], bidderRequest }),
-          bidParams: currentBidRequest.params,
+          bidParams: filteredParams,
         },
       };
     });
