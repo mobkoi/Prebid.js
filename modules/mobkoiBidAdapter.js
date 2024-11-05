@@ -57,8 +57,6 @@ export const spec = {
       response: responseBody,
     });
 
-    // eslint-disable-next-line no-console
-    console.log({ serverResponse, bidRequest, prebidBidResponse });
     return prebidBidResponse.bids;
   },
 
