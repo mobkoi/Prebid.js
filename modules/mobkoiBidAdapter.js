@@ -1,13 +1,24 @@
 import { ortbConverter } from '../libraries/ortbConverter/converter.js';
 import { registerBidder } from '../src/adapters/bidderFactory.js';
 import { BANNER } from '../src/mediaTypes.js';
+import { _each, replaceMacros, deepAccess, deepSetValue } from '../src/utils.js';
 
 const BIDDER_CODE = 'mobkoi';
-const DEFAULT_BIDDING_ENDPOINT = 'https://adserver.mobkoi.com/bid';
-const PARAMS_BIDDING_ENDPOINT = 'biddingEndpoint';
+const DEFAULT_AD_SERVER_BASE_URL = 'https://adserver.mobkoi.com';
+/**
+ * The name of the parameter that the publisher can use to specify the ad server endpoint.
+ */
+const PARAM_NAME_AD_SERVER_BASE_URL = 'adServerBaseUrl';
+/**
+ * The list of ORTB response fields that are used in the macros. Field
+ * replacement is self-implemented in the adapter. Use dot-notated path for
+ * nested fields. For example, 'ad.ext.adomain'. For more information, visit
+ * https://www.npmjs.com/package/dset and https://www.npmjs.com/package/dlv.
+ */
+const ORTB_RESPONSE_FIELDS_SUPPORT_MACROS = ['adm', 'nurl', 'lurl'];
 
-const getBidServerEndpoint = (bidRequest) => {
-  return bidRequest.params[PARAMS_BIDDING_ENDPOINT] || DEFAULT_BIDDING_ENDPOINT;
+const getBidServerEndpointBase = (prebidBidRequest) => {
+  return prebidBidRequest.params[PARAM_NAME_AD_SERVER_BASE_URL] || DEFAULT_AD_SERVER_BASE_URL;
 }
 
 const converter = ortbConverter({
@@ -15,50 +26,66 @@ const converter = ortbConverter({
     netRevenue: true,
     ttl: 30,
   },
-  bidResponse(buildBidResponse, bid, context) {
-    const bidResponse = buildBidResponse(bid, context);
-    return bidResponse;
-  }
+  imp(buildImp, bidRequest, context) {
+    context[PARAM_NAME_AD_SERVER_BASE_URL] = getBidServerEndpointBase(bidRequest);
+    return buildImp(bidRequest, context);
+  },
+  bidResponse(buildPrebidBidResponse, ortbBidResponse, context) {
+    const macros = {
+      // AUCTION_PRICE: Don't replace the price macro because it's already replaced by Prebid.js.
+      BIDDING_API_BASE_URL: context[PARAM_NAME_AD_SERVER_BASE_URL],
+      AUCTION_BID_ID: context.bidderRequest.auctionId,
+      AUCTION_IMP_ID: ortbBidResponse.impid,
+      AUCTION_CURRENCY: ortbBidResponse.cur,
+    };
+
+    _each(ORTB_RESPONSE_FIELDS_SUPPORT_MACROS, ortbField => {
+      deepSetValue(
+        ortbBidResponse,
+        ortbField,
+        replaceMacros(deepAccess(ortbBidResponse, ortbField), macros)
+      );
+    });
+
+    return buildPrebidBidResponse(ortbBidResponse, context);
+  },
 });
 
 export const spec = {
   code: BIDDER_CODE,
   supportedMediaTypes: [BANNER],
 
-  isBidRequestValid: function (bid) {
+  isBidRequestValid(bid) {
     return true;
   },
 
-  buildRequests: function (validBidRequests, bidderRequest) {
-    return validBidRequests.map(currentBidRequest => {
-      const biddingEndpoint = getBidServerEndpoint(currentBidRequest)
-      // Omit bidding endpoint from bidParams
-      const { [PARAMS_BIDDING_ENDPOINT]: _, ...filteredParams } = currentBidRequest.params;
+  buildRequests(prebidBidRequests, prebidBidderRequest) {
+    return prebidBidRequests.map(currentPrebidBidRequest => {
       return {
         method: 'POST',
-        url: biddingEndpoint,
+        url: getBidServerEndpointBase(currentPrebidBidRequest) + '/bid',
         options: {
           contentType: 'application/json',
         },
         data: {
-          ortb: converter.toORTB({ bidRequests: [currentBidRequest], bidderRequest }),
-          bidParams: filteredParams,
+          ortb: converter.toORTB({ bidRequests: [currentPrebidBidRequest], bidderRequest: prebidBidderRequest }),
+          publisherBidParams: currentPrebidBidRequest.params,
         },
       };
     });
   },
 
-  interpretResponse: function (serverResponse, bidRequest) {
+  interpretResponse(serverResponse, customBidRequest) {
     if (!serverResponse.body) return [];
 
     const responseBody = {...serverResponse.body, seatbid: serverResponse.body.seatbid};
     const prebidBidResponse = converter.fromORTB({
-      request: bidRequest.data.ortb,
+      request: customBidRequest.data.ortb,
       response: responseBody,
     });
 
     return prebidBidResponse.bids;
   },
-
 };
+
 registerBidder(spec);
