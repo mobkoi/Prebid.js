@@ -1,13 +1,56 @@
 import adapter from '../libraries/analyticsAdapter/AnalyticsAdapter.js';
 import adapterManager from '../src/adapterManager.js';
 import { EVENTS } from '../src/constants.js';
-import { logInfo } from '../src/utils.js';
+import { logInfo, logError } from '../src/utils.js';
+import { sendBeacon, ajax } from '../src/ajax.js';
 
 const BIDDER_CODE = 'mobkoi';
 const analyticsType = 'endpoint';
 const GVL_ID = 898;
+const {
+  BID_TIMEOUT,
+  BID_REJECTED,
+  NO_BID,
+  SEAT_NON_BID,
+  BIDDER_ERROR,
+  PAAPI_NO_BID,
+  PAAPI_ERROR,
+} = EVENTS;
+
+/**
+ * Events that are considered as loss bid events
+ */
+const LOSS_BID_EVENTS = [
+  BID_TIMEOUT,
+  BID_REJECTED,
+  NO_BID,
+  SEAT_NON_BID,
+  BIDDER_ERROR,
+  PAAPI_NO_BID,
+  PAAPI_ERROR,
+];
 
 let initOptions = {};
+
+function handleLossBidEvents(eventType, args) {
+  const payload = {
+    eventType,
+    args
+  };
+
+  console.log('handleLossBidEvents', payload);
+
+  if (!sendBeacon(initOptions.options.endpoint, payload)) {
+    // Fallback to using AJAX if Beacon API is not supported
+    ajax(initOptions.options.endpoint, undefined, payload, {
+      contentType: 'text/plain',
+      method: 'POST',
+      withCredentials: false, // No user-specific data is tied to the request
+      // referrerPolicy: 'unsafe-url',
+      crossOrigin: true
+    });
+  }
+}
 
 let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
   track({
@@ -16,35 +59,9 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
   }) {
     logInfo(`eventType: ${eventType}`, args);
 
-    // switch (eventType) {
-    //   case EVENTS.AUCTION_INIT:
-    //     logInfo(`eventType: ${eventType}`, args);
-    //     // handleAuctionInit(eventType, args);
-    //     break;
-    //   case EVENTS.BID_REQUESTED:
-    //     logInfo(`eventType: ${eventType}`, args);
-    //     // handleBidRequested(args);
-    //     break;
-    //   case EVENTS.BID_RESPONSE:
-    //     logInfo(`eventType: ${eventType}`, args);
-    //     // handleBidResponse(eventType, args);
-    //     break;
-    //   case EVENTS.NO_BID:
-    //     logInfo(`eventType: ${eventType}`, args);
-    //     // handleNoBid(eventType, args);
-    //     break;
-    //   case EVENTS.BID_TIMEOUT:
-    //     logInfo(`eventType: ${eventType}`, args);
-    //     // handleBidTimeout(eventType, args);
-    //     break;
-    //   case EVENTS.BID_WON:
-    //     logInfo(`eventType: ${eventType}`, args);
-    //     // handleBidWon(eventType, args);
-    //     break;
-    //   case EVENTS.AUCTION_END:
-    //     logInfo(`eventType: ${eventType}`, args);
-    //     // handleAuctionEnd();
-    // }
+    if (LOSS_BID_EVENTS.includes(eventType)) {
+      handleLossBidEvents(eventType, args);
+    }
   }
 });
 
@@ -54,6 +71,16 @@ mobkoiAnalytics.originEnableAnalytics = mobkoiAnalytics.enableAnalytics;
 // override enableAnalytics so we can get access to the config passed in from the page
 mobkoiAnalytics.enableAnalytics = function (config) {
   initOptions = config.options;
+  if (!config.options.publisherId) {
+    logError('PublisherId option is not defined. Analytics won\'t work');
+    return;
+  }
+
+  if (!config.options.endpoint) {
+    logError('Endpoint option is not defined. Analytics won\'t work');
+    return;
+  }
+
   logInfo('mobkoiAnalytics.enableAnalytics', initOptions);
   mobkoiAnalytics.originEnableAnalytics(config); // call the base class function
 };

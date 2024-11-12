@@ -4,7 +4,6 @@ import { BANNER } from '../src/mediaTypes.js';
 import { _each, replaceMacros, deepAccess, deepSetValue } from '../src/utils.js';
 
 const BIDDER_CODE = 'mobkoi';
-const DEFAULT_AD_SERVER_BASE_URL = 'https://adserver.mobkoi.com';
 /**
  * The name of the parameter that the publisher can use to specify the ad server endpoint.
  */
@@ -18,7 +17,12 @@ const PARAM_NAME_AD_SERVER_BASE_URL = 'adServerBaseUrl';
 const ORTB_RESPONSE_FIELDS_SUPPORT_MACROS = ['adm', 'nurl', 'lurl'];
 
 const getBidServerEndpointBase = (prebidBidRequest) => {
-  return prebidBidRequest.params[PARAM_NAME_AD_SERVER_BASE_URL] || DEFAULT_AD_SERVER_BASE_URL;
+  const adServerBaseUrl = prebidBidRequest.params[PARAM_NAME_AD_SERVER_BASE_URL];
+
+  if (!adServerBaseUrl) {
+    throw new Error(`The "${PARAM_NAME_AD_SERVER_BASE_URL}" parameter is required in Ad unit bid params.`);
+  }
+  return adServerBaseUrl;
 }
 
 const converter = ortbConverter({
