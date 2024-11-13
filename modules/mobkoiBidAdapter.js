@@ -25,7 +25,7 @@ const getBidServerEndpointBase = (prebidBidRequest) => {
   return adServerBaseUrl;
 }
 
-const converter = ortbConverter({
+export const converter = ortbConverter({
   context: {
     netRevenue: true,
     ttl: 30,
@@ -37,7 +37,7 @@ const converter = ortbConverter({
   bidResponse(buildPrebidBidResponse, ortbBidResponse, context) {
     const macros = {
       // ORTB macros
-      // AUCTION_PRICE: Don't replace the price macro because it's already replaced by Prebid.js.
+      AUCTION_PRICE: ortbBidResponse.price,
       AUCTION_IMP_ID: ortbBidResponse.impid,
       AUCTION_CURRENCY: ortbBidResponse.cur,
       AUCTION_BID_ID: context.bidderRequest.auctionId,
@@ -57,7 +57,8 @@ const converter = ortbConverter({
     });
 
     const prebidBid = buildPrebidBidResponse(ortbBidResponse, context);
-    prebidBid.ortbBidResponse = ortbBidResponse;
+    prebidBid.ortbBid = ortbBidResponse;
+    console.log('prebidBid', prebidBid);
     return prebidBid;
   },
 });

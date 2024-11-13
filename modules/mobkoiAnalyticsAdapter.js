@@ -1,66 +1,97 @@
 import adapter from '../libraries/analyticsAdapter/AnalyticsAdapter.js';
 import adapterManager from '../src/adapterManager.js';
 import { EVENTS } from '../src/constants.js';
-import { logInfo, logError } from '../src/utils.js';
-import { sendBeacon, ajax } from '../src/ajax.js';
+import { logInfo, logError, _each, triggerPixel, logWarn } from '../src/utils.js';
+import { ajax } from '../src/ajax.js';
+import { BID_RESPONSE } from '../src/pbjsORTB.js';
 
 const BIDDER_CODE = 'mobkoi';
 const analyticsType = 'endpoint';
 const GVL_ID = 898;
 const {
-  BID_TIMEOUT,
-  BID_REJECTED,
-  NO_BID,
-  SEAT_NON_BID,
-  BIDDER_ERROR,
-  PAAPI_NO_BID,
-  PAAPI_ERROR,
+  BID_WON,
+  BIDDER_DONE,
 } = EVENTS;
 
 /**
- * Events that are considered as loss bid events
+ * The options that are passed in from the page
  */
-const LOSS_BID_EVENTS = [
-  BID_TIMEOUT,
-  BID_REJECTED,
-  NO_BID,
-  SEAT_NON_BID,
-  BIDDER_ERROR,
-  PAAPI_NO_BID,
-  PAAPI_ERROR,
-];
-
 let initOptions = {};
 
-function handleLossBidEvents(eventType, args) {
-  const payload = {
-    eventType,
-    args
+async function sendGetRequest(url) {
+  return new Promise((resolve, reject) => {
+    try {
+      logInfo('triggerPixel', url);
+      triggerPixel(url, resolve);
+    } catch (error) {
+      try {
+        logWarn(`triggerPixel failed. URL: (${url}) Falling back to ajax. Error: `, error);
+        ajax(url, resolve, null, {
+          contentType: 'application/json',
+          method: 'GET',
+          withCredentials: false, // No user-specific data is tied to the request
+          referrerPolicy: 'unsafe-url',
+          crossOrigin: true
+        });
+      } catch (error) {
+        // If failed with both methods, reject the promise
+        reject(error);
+      }
+    }
+  });
+}
+
+function isMobkoiBid(prebidBid) {
+  return prebidBid && prebidBid.bidderCode === BIDDER_CODE;
+}
+
+function triggerAllLossBidLossBeacon(prebidBid, mobkoiContext) {
+  _each(Object.values(mobkoiContext.prebidAndOrtbBids), (bidContext) => {
+    const { ortbBid, bidWin, lurlTriggered } = bidContext;
+    if (ortbBid.lurl && !bidWin && !lurlTriggered) {
+      logInfo('triggerLossBeacon', bidWin, prebidBid);
+      sendGetRequest(ortbBid.lurl);
+      // Don't wait for the response to continue to avoid race conditions
+      bidContext.lurlTriggered = true;
+    }
+  });
+}
+
+function appendToContext(prebidBid, mobkoiContext) {
+  mobkoiContext.prebidAndOrtbBids[prebidBid.adId] = {
+    prebidBid,
+    ortbBid: prebidBid.ortbBid,
+    bidWin: false,
+    lurlTriggered: false
   };
-
-  console.log('handleLossBidEvents', payload);
-
-  if (!sendBeacon(initOptions.options.endpoint, payload)) {
-    // Fallback to using AJAX if Beacon API is not supported
-    ajax(initOptions.options.endpoint, undefined, payload, {
-      contentType: 'text/plain',
-      method: 'POST',
-      withCredentials: false, // No user-specific data is tied to the request
-      // referrerPolicy: 'unsafe-url',
-      crossOrigin: true
-    });
-  }
 }
 
 let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
+  mobkoiContext: {
+    prebidAndOrtbBids: {}
+  },
   track({
     eventType,
     args
   }) {
     logInfo(`eventType: ${eventType}`, args);
 
-    if (LOSS_BID_EVENTS.includes(eventType)) {
-      handleLossBidEvents(eventType, args);
+    switch (eventType) {
+      case BID_RESPONSE:
+        appendToContext(args, this.mobkoiContext);
+        break;
+      case BID_WON:
+        if (isMobkoiBid(args)) {
+          this.mobkoiContext.prebidAndOrtbBids[args.adId].bidWin = true;
+        }
+
+        triggerAllLossBidLossBeacon(args, this.mobkoiContext);
+        break;
+      case BIDDER_DONE:
+        triggerAllLossBidLossBeacon(args, this.mobkoiContext);
+        break;
+      default:
+        break;
     }
   }
 });
