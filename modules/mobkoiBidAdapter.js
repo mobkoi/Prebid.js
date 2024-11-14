@@ -57,8 +57,9 @@ export const converter = ortbConverter({
     });
 
     const prebidBid = buildPrebidBidResponse(ortbBidResponse, context);
+    // Save the ORTB response for later use in the other parts of the adapter as
+    // well as the within the analytics adapter.
     prebidBid.ortbBid = ortbBidResponse;
-    console.log('prebidBid', prebidBid);
     return prebidBid;
   },
 });

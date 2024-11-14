@@ -88,6 +88,9 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
         triggerAllLossBidLossBeacon(args, this.mobkoiContext);
         break;
       case BIDDER_DONE:
+        if (args.bidderCode !== BIDDER_CODE) {
+          break;
+        }
         triggerAllLossBidLossBeacon(args, this.mobkoiContext);
         break;
       default:
