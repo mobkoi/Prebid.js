@@ -29,10 +29,7 @@ export const converter = ortbConverter({
     replaceAllMacrosInPlace(ortbBidResponse, context);
 
     const prebidBid = buildPrebidBidResponse(ortbBidResponse, context);
-    // Save the ORTB response for later use in the other parts of the adapter as
-    // well as the within the analytics adapter.
-    prebidBid.ortbBidResponse = ortbBidResponse;
-    prebidBid.ortbId = ortbBidResponse.id;
+    addCustomFieldsToPrebidBidResponse(prebidBid, ortbBidResponse);
     return prebidBid;
   },
 });
@@ -107,4 +104,15 @@ function getBidServerEndpointBase (prebidBidRequest) {
     throw new Error(`The "${PARAM_NAME_AD_SERVER_BASE_URL}" parameter is required in Ad unit bid params.`);
   }
   return adServerBaseUrl;
+}
+
+/**
+ * Append custom fields to the prebid bid response. so that they can be accessed
+ * in various event handlers.
+ * @param {*} prebidBidResponse
+ * @param {*} ortbBidResponse
+ */
+function addCustomFieldsToPrebidBidResponse(prebidBidResponse, ortbBidResponse) {
+  prebidBidResponse.ortbBidResponse = ortbBidResponse;
+  prebidBidResponse.ortbId = ortbBidResponse.id;
 }
