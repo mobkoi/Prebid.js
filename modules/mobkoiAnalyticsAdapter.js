@@ -112,7 +112,13 @@ class LocalContext {
   retrieveBidContext(bid) {
     const ortbId = (() => {
       try {
-        getOrtbId(bid);
+        const id = getOrtbId(bid);
+        if (!id) {
+          throw new Error(
+            'ORTB ID is not available in the given bid object:' +
+            JSON.stringify(bid, null, 2));
+        }
+        return id;
       } catch (error) {
         throw new Error(
           'Failed to retrieve ORTB ID from bid object. Please ensure the given object contains an ORTB ID field.\n' +
@@ -129,34 +135,14 @@ class LocalContext {
     /**
      * Create a new context object and return it.
      */
-    const bidType = determineObjType(bid);
+    let newBidContext = new BidContext({
+      localContext: this,
+      prebidOrOrtbBidResponse: bid,
+    });
 
-    if (![COMMON_OBJECT_TYPES.ORTB_BID, COMMON_OBJECT_TYPES.PREBID_RESPONSE_INTERPRETED].includes(bidType)) {
-      throw new Error(
-        'Unable to create a new Bid Context as the given object is not a bid object. Expect a Prebid Bid Object or ORTB Bid Object. Given object:' +
-        JSON.stringify(bid, null, 2)
-      );
-    }
-
-    let newBidContext = null;
-
-    if (bidType === COMMON_OBJECT_TYPES.ORTB_BID) {
-      newBidContext = new BidContext({
-        localContext: this,
-        ortbBidResponse: bid,
-        prebidBidResponse: null,
-      });
-    } else if (bidType === COMMON_OBJECT_TYPES.PREBID_RESPONSE_INTERPRETED) {
-      newBidContext = new BidContext({
-        localContext: this,
-        ortbBidResponse: bid.ortbBidResponse,
-        prebidBidResponse: bid,
-      });
-    } else {
-      throw new Error(`Unknown bid object type. Given object:\n${JSON.stringify(bid, null, 2)}`);
-    }
-
-    // Push common events to the new bid context.
+    /**
+     * Add the data that store in local context to the new bid context.
+     */
     _each(
       this.commonBidContextEvents,
       event => newBidContext.pushEvent(event)
@@ -199,7 +185,8 @@ class LocalContext {
    * Push an debug event to all bid contexts. This is useful for events that are
    * related to all bids in the auction.
    * @param {*} debugEvent
-   * @param {*} payload
+   * @param {*} payload Field values from event args that are useful for
+   * debugging. Payload cross events will merge into one object.
    */
   pushCommonEventToAllBidContexts(debugEvent, payload) {
     this.commonBidContextEvents.push(debugEvent);
@@ -687,6 +674,10 @@ class BidContext {
     this.localContext = localContext;
     this._payload = {};
 
+    if (!bidResponse) {
+      throw new Error('prebidOrOrtbBidResponse is required');
+    }
+
     const objType = determineObjType(bidResponse);
     if (![COMMON_OBJECT_TYPES.ORTB_BID, COMMON_OBJECT_TYPES.PREBID_RESPONSE_INTERPRETED].includes(objType)) {
       throw new Error(
@@ -709,7 +700,8 @@ class BidContext {
   /**
    * Push a debug event to the context which will submitted to server for debugging.
    * @param {*} bugEvent DebugEvent object
-   * @param {*} payload Additional data to be submitted to the server
+   * @param {*} payload Field values from event args that are useful for
+   * debugging. Payload cross events will merge into one object.
    */
   pushEvent(bugEvent, payload = undefined) {
     if (!(bugEvent instanceof DebugEvent)) {
@@ -818,12 +810,16 @@ function isMobkoiBid(prebidBid) {
 function getOrtbId(bid) {
   if (bid.id) {
     if (debugTurnedOn()) {
-      const objType = determineObjType(bid);
-      if (!objType === COMMON_OBJECT_TYPES.ORTB_BID) {
-        logWarn(
-          `Given object is not an ORTB bid response. Given object type: ${objType}.`,
-          bid
-        );
+      try {
+        const objType = determineObjType(bid);
+        if (!objType === COMMON_OBJECT_TYPES.ORTB_BID) {
+          logWarn(
+            `Given object is not an ORTB bid response. Given object type: ${objType}.`,
+            bid
+          );
+        }
+      } catch (error) {
+        logWarn('Error when determining object type. Given object:', bid);
       }
     }
     // If it's an ORTB bid response
@@ -871,11 +867,11 @@ function logTrackEvent(eventType, args) {
     try {
       return determineObjType(args);
     } catch (error) {
-      logError(`Error when logging track event: ${eventType}\n`, error);
+      logError(`Error when logging track event: [${eventType}]\n`, error);
       return 'Unknown';
     }
   })();
-  logInfo(`Track event: ${eventType}. Args Object Type: ${argsType}`, args);
+  logInfo(`Track event: [${eventType}]. Args Object Type: ${argsType}`, args);
 }
 
 const COMMON_OBJECT_TYPES = {
@@ -891,17 +887,17 @@ const COMMON_OBJECT_TYPES = {
  * Fields that are united to objects used to identify the object type.
  */
 const COMMON_OBJECT_UNIT_FIELDS = {
-  [COMMON_OBJECT_TYPES.AUCTION]: ['bidderRequests'],
+  [COMMON_OBJECT_TYPES.AUCTION]: ['auctionStatus'],
   [COMMON_OBJECT_TYPES.BIDDER_REQUEST]: ['bidderRequestId'],
   [COMMON_OBJECT_TYPES.ORTB_BID]: ['adm', 'impid'],
-  [COMMON_OBJECT_TYPES.PREBID_RESPONSE_INTERPRETED]: ['requestId'],
+  [COMMON_OBJECT_TYPES.PREBID_RESPONSE_INTERPRETED]: ['requestId', 'ortbBidResponse'],
   [COMMON_OBJECT_TYPES.PREBID_BID_REQUEST]: ['bidId'],
   [COMMON_OBJECT_TYPES.AD_DOC_AND_PREBID_BID]: ['doc', 'bid'],
 };
 
 function determineObjType(trackArgs) {
   if (typeof trackArgs !== 'object' || trackArgs === null) {
-    throw new Error('Expect an object. Given object is not an object or null');
+    throw new Error('determineObjType: Expect an object. Given object is not an object or null');
   }
 
   let objType = null;
