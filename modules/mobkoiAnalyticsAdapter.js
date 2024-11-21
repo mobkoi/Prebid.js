@@ -178,12 +178,12 @@ class LocalContext {
   /**
    * Push an debug event to all bid contexts. This is useful for events that are
    * related to all bids in the auction.
-   * @param {*} debugEvent
+   * @param {*} event
    * @param {*} payload Field values from event args that are useful for
    * debugging. Payload cross events will merge into one object.
    */
-  pushEventToAllBidContexts(debugEvent, payload) {
-    this.commonBidContextEvents.push(debugEvent);
+  pushEventToAllBidContexts(event, payload) {
+    this.commonBidContextEvents.push(event);
     this.mergePayload(payload);
 
     if (isEmpty(this.bidContexts)) {
@@ -192,7 +192,7 @@ class LocalContext {
     }
 
     _each(this.bidContexts, (bidContext) => {
-      bidContext.pushEvent(debugEvent, this.payload);
+      bidContext.pushEvent(event, this.payload);
     });
   }
 
@@ -374,7 +374,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           const auction = eventArgs;
           this.localContext.initialise(auction);
           this.localContext.pushEventToAllBidContexts(
-            new DebugEvent({
+            new Event({
               eventType,
               level: DEBUG_EVENT_LEVELS.info,
               timestamp: auction.timestamp,
@@ -391,7 +391,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           const prebidBid = eventArgs;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
           bidContext.pushEvent(
-            new DebugEvent({
+            new Event({
               eventType,
               level: DEBUG_EVENT_LEVELS.info,
             }),
@@ -413,7 +413,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           // Append the bid win/loss event to all bid contexts
           _each(this.localContext.bidContexts, (bidContext) => {
             bidContext.pushEvent(
-              new DebugEvent({
+              new Event({
                 eventType: bidContext.bidWin ? eventType : CUSTOM_EVENTS.BID_LOSS,
                 level: DEBUG_EVENT_LEVELS.info,
               }),
@@ -429,7 +429,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           const argsType = determineObjType(eventArgs);
           const auction = eventArgs;
           this.localContext.pushEventToAllBidContexts(
-            new DebugEvent({
+            new Event({
               eventType,
               level: DEBUG_EVENT_LEVELS.info,
               timestamp: auction.timestamp,
@@ -445,7 +445,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           const argsType = determineObjType(eventArgs);
           const auction = eventArgs;
           this.localContext.pushEventToAllBidContexts(
-            new DebugEvent({
+            new Event({
               eventType,
               level: DEBUG_EVENT_LEVELS.error,
               timestamp: auction.timestamp,
@@ -458,12 +458,12 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
         case NO_BID: {
           logTrackEvent(eventType, eventArgs);
           const argsType = determineObjType(eventArgs);
-          const debugEvent = new DebugEvent({
+          const event = new Event({
             eventType,
             level: DEBUG_EVENT_LEVELS.warn,
           });
           this.localContext.pushEventToAllBidContexts(
-            debugEvent,
+            event,
             {
               [argsType]: pickKeyFields(argsType, eventArgs)
             }
@@ -476,7 +476,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           const prebidBid = eventArgs;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
           bidContext.pushEvent(
-            new DebugEvent({
+            new Event({
               eventType,
               level: DEBUG_EVENT_LEVELS.warn,
             }),
@@ -490,7 +490,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           logTrackEvent(eventType, eventArgs)
           const argsType = determineObjType(eventArgs);
           this.localContext.pushEventToAllBidContexts(
-            new DebugEvent({
+            new Event({
               eventType,
               level: DEBUG_EVENT_LEVELS.warn,
             }),
@@ -506,7 +506,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           const {bid: prebidBid} = eventArgs;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
           bidContext.pushEvent(
-            new DebugEvent({
+            new Event({
               eventType,
               level: DEBUG_EVENT_LEVELS.error,
             }),
@@ -522,7 +522,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           const prebidBid = eventArgs.bid;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
           bidContext.pushEvent(
-            new DebugEvent({
+            new Event({
               eventType,
               level: DEBUG_EVENT_LEVELS.info,
             }),
@@ -536,7 +536,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           logTrackEvent(eventType, eventArgs)
           const argsType = determineObjType(eventArgs);
           this.localContext.pushEventToAllBidContexts(
-            new DebugEvent({
+            new Event({
               eventType,
               level: DEBUG_EVENT_LEVELS.info,
               timestamp: eventArgs.timestamp,
@@ -557,7 +557,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
       // If there is an unexpected error, log the error and submit the error to
       // the server for debugging.
       this.localContext.pushEventToAllBidContexts(
-        new DebugEvent({
+        new Event({
           eventType,
           level: DEBUG_EVENT_LEVELS.error,
           timestamp: eventArgs.timestamp,
@@ -745,7 +745,7 @@ class BidContext {
    * debugging. Payload cross events will merge into one object.
    */
   pushEvent(bugEvent, payload = undefined) {
-    if (!(bugEvent instanceof DebugEvent)) {
+    if (!(bugEvent instanceof Event)) {
       throw new Error('bugEvent must be an instance of DebugEvent');
     }
     this.events.push(bugEvent);
@@ -757,9 +757,9 @@ class BidContext {
 }
 
 /**
- * A class defines the uniform structure of a debug event object.
+ * A class to represent an event happened in the bid processing lifecycle.
  */
-class DebugEvent {
+class Event {
   constructor({eventType, level, timestamp = undefined, note = undefined}) {
     if (!eventType) {
       throw new Error('eventType is required');
