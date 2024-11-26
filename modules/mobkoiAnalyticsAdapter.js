@@ -67,23 +67,35 @@ class LocalContext {
   bidContexts = {};
 
   /**
-   * Shouldn't be accessed directly. Use the getter and mergePayload method instead.
+   * Shouldn't be accessed directly. Use getPayloadByImpId method instead.
+   * Payload are indexed by impression ID.
    */
-  _commonPayload = {};
+  _impressionPayloadCache = {
+    // [impid]: { ... }
+  };
   /**
    * The payload that is common to all bid contexts. The payload will be
    * submitted to the server along with the debug events.
    */
-  get payload() {
-    return this._commonPayload;
+  getImpressionPayload(impid) {
+    if (!impid) {
+      throw new Error(`Impression ID is required. Given: "${impid}".`);
+    }
+
+    return this._impressionPayloadCache[impid] || {};
   }
   /**
-   * To avoid overriding the payload object, we merge the new values to
-   * the existing payload object.
+   * Update the payload for all impressions. The new values will be merged to
+   * the existing payload.
    * @param {*} newValues Object containing new values to be merged
    */
-  mergePayload(newValues) {
-    mergeDeep(this._commonPayload, newValues);
+  mergeToAllImpressionsPayload(newValues) {
+    _each(this.getAllBidderRequestImpIds(), currentImpid => {
+      if (!this._impressionPayloadCache[currentImpid]) {
+        this._impressionPayloadCache[currentImpid] = {};
+      }
+      mergePayloadAndSetImpid(this._impressionPayloadCache[currentImpid], newValues, currentImpid);
+    });
   }
 
   /**
@@ -96,6 +108,16 @@ class LocalContext {
    * Auction.bidderRequests object
    */
   bidderRequests = null;
+
+  /**
+   * Extract all impression IDs from all bid requests.
+   */
+  getAllBidderRequestImpIds() {
+    if (!Array.isArray(this.bidderRequests)) {
+      return [];
+    }
+    return this.bidderRequests.flatMap(br => br.bids.map(bid => getImpId(bid)));
+  }
 
   /**
    * Cache the debug events that are common to all bid contexts.
@@ -151,10 +173,12 @@ class LocalContext {
      */
     _each(
       this.commonBidContextEvents,
-      event => newBidContext.pushEvent(event)
+      event => newBidContext.pushEvent({
+        eventInstance: event,
+      })
     );
     // Merge common payload to the new bid context
-    newBidContext.mergePayload(this.payload);
+    newBidContext.mergePayload(this.getImpressionPayload(newBidContext.impid));
 
     this.bidContexts[ortbId] = newBidContext;
     return newBidContext;
@@ -178,21 +202,49 @@ class LocalContext {
   /**
    * Push an debug event to all bid contexts. This is useful for events that are
    * related to all bids in the auction.
-   * @param {*} event
+   * @param {*} eventType Prebid event type or custom event type
+   * @param {*} level Debug level of the event. It can be one of the following:
+   * - info
+   * - warn
+   * - error
+   * @param {*} timestamp Default to current timestamp if not provided.
+   * @param {*} note Optional field. Additional information about the event.
    * @param {*} payload Field values from event args that are useful for
    * debugging. Payload cross events will merge into one object.
    */
-  pushEventToAllBidContexts(event, payload) {
-    this.commonBidContextEvents.push(event);
-    this.mergePayload(payload);
+  pushEventToAllBidContexts({eventType, level, timestamp, note, payload}) {
+    // Create one event for each impression ID
+    _each(this.getAllBidderRequestImpIds(), impid => {
+      const eventClone = new Event({
+        eventType,
+        impid,
+        level,
+        timestamp,
+        note,
+      });
+      // Save to the LocalContext
+      this.commonBidContextEvents.push(eventClone);
+      this.mergeToAllImpressionsPayload(payload);
+    });
 
+    // If there are no bid contexts, push the event to the common events list
     if (isEmpty(this.bidContexts)) {
       this._commonBidContextEventsFlushed = false;
       return;
     }
 
+    // Once the bid contexts are available, push the event to all bid contexts
     _each(this.bidContexts, (bidContext) => {
-      bidContext.pushEvent(event, this.payload);
+      bidContext.pushEvent({
+        eventInstance: new Event({
+          eventType,
+          impid: bidContext.impid,
+          level,
+          timestamp,
+          note,
+        }),
+        payload: this.getImpressionPayload(bidContext.impid),
+      });
     });
   }
 
@@ -225,16 +277,26 @@ class LocalContext {
       )
     ) {
       logInfo('Flush common events to the server');
-      flushPromises.push(postAjax(
-        `${initOptions.endpoint}/debug`,
-        {
-          impid: getImpId(this.payload),
-          ortbId: safeGetOrtbId(this.payload),
-          events: this.commonBidContextEvents,
-          bidWin: null,
-          payload: this.payload,
-        }
-      ));
+      const debugReports = this.bidderRequests.flatMap(currentBidderRequest => {
+        return currentBidderRequest.bids.map(bid => {
+          const impid = getImpId(bid);
+          return {
+            impid: impid,
+            events: this.commonBidContextEvents,
+            bidWin: null,
+            // Unroll the payload object to the top level to make it easier for
+            // Grafana to process the data.
+            ...this.getImpressionPayload(impid),
+          };
+        });
+      });
+
+      _each(debugReports, debugReport => {
+        flushPromises.push(postAjax(
+          `${initOptions.endpoint}/debug`,
+          debugReport
+        ));
+      });
 
       this._commonBidContextEventsFlushed = true;
     }
@@ -247,10 +309,11 @@ class LocalContext {
             `${initOptions.endpoint}/debug`,
             {
               impid: currentBidContext.impid,
-              ortbId: currentBidContext.ortbId,
               bidWin: currentBidContext.bidWin,
               events: currentBidContext.events,
-              payload: currentBidContext.payload,
+              // Unroll the payload object to the top level to make it easier for
+              // Grafana to process the data.
+              ...currentBidContext.payload,
             }
           );
         }));
@@ -319,7 +382,6 @@ function pickKeyFields(objType, eventArgs) {
           'mediaType',
           'bidderRequestId',
         ]),
-        ortbBidResponse: pickKeyFields(OBJECT_TYPES.ORTB_BID, eventArgs.ortbBidResponse),
       };
     }
     case OBJECT_TYPES.PREBID_BID_REQUEST: {
@@ -364,187 +426,187 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
   localContext: new LocalContext(),
   async track({
     eventType,
-    args: eventArgs
+    args: prebidEventArgs
   }) {
     try {
       switch (eventType) {
         case AUCTION_INIT: {
-          logTrackEvent(eventType, eventArgs);
-          const argsType = determineObjType(eventArgs);
-          const auction = eventArgs;
+          logTrackEvent(eventType, prebidEventArgs);
+          const argsType = determineObjType(prebidEventArgs);
+          const auction = prebidEventArgs;
           this.localContext.initialise(auction);
-          this.localContext.pushEventToAllBidContexts(
-            new Event({
-              eventType,
-              level: DEBUG_EVENT_LEVELS.info,
-              timestamp: auction.timestamp,
-            }),
-            {
-              [argsType]: pickKeyFields(argsType, eventArgs)
+          this.localContext.pushEventToAllBidContexts({
+            eventType,
+            level: DEBUG_EVENT_LEVELS.info,
+            timestamp: auction.timestamp,
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
-          );
+          });
           break;
         }
         case BID_RESPONSE: {
-          logTrackEvent(eventType, eventArgs);
-          const argsType = determineObjType(eventArgs);
-          const prebidBid = eventArgs;
+          logTrackEvent(eventType, prebidEventArgs);
+          const argsType = determineObjType(prebidEventArgs);
+          const prebidBid = prebidEventArgs;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
-          bidContext.pushEvent(
-            new Event({
+          bidContext.pushEvent({
+            eventInstance: new Event({
               eventType,
+              impid: bidContext.impid,
               level: DEBUG_EVENT_LEVELS.info,
+              timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
-            {
-              [argsType]: pickKeyFields(argsType, eventArgs)
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs),
+              [OBJECT_TYPES.ORTB_BID]: pickKeyFields(OBJECT_TYPES.ORTB_BID, prebidEventArgs.ortbBidResponse),
             }
-          );
+          });
           break;
         }
         case BID_WON: {
-          logTrackEvent(eventType, eventArgs);
-          const argsType = determineObjType(eventArgs);
-          const prebidBid = eventArgs;
+          logTrackEvent(eventType, prebidEventArgs);
+          const argsType = determineObjType(prebidEventArgs);
+          const prebidBid = prebidEventArgs;
           if (isMobkoiBid(prebidBid)) {
             this.localContext.retrieveBidContext(prebidBid).bidWin = true;
           }
           // Notify the server that the bidding results.
           this.localContext.triggerAllLossBidLossBeacon();
           // Append the bid win/loss event to all bid contexts
-          _each(this.localContext.bidContexts, (bidContext) => {
-            bidContext.pushEvent(
-              new Event({
-                eventType: bidContext.bidWin ? eventType : CUSTOM_EVENTS.BID_LOSS,
+          _each(this.localContext.bidContexts, (currentBidContext) => {
+            currentBidContext.pushEvent({
+              eventInstance: new Event({
+                eventType: currentBidContext.bidWin ? eventType : CUSTOM_EVENTS.BID_LOSS,
+                impid: currentBidContext.impid,
                 level: DEBUG_EVENT_LEVELS.info,
+                timestamp: prebidEventArgs.timestamp || Date.now(),
               }),
-              {
-                [argsType]: pickKeyFields(argsType, eventArgs),
+              payload: {
+                [argsType]: pickKeyFields(argsType, prebidEventArgs),
               }
-            );
+            });
           });
           break;
         }
         case AUCTION_END: {
-          logTrackEvent(eventType, eventArgs);
-          const argsType = determineObjType(eventArgs);
-          const auction = eventArgs;
-          this.localContext.pushEventToAllBidContexts(
-            new Event({
-              eventType,
-              level: DEBUG_EVENT_LEVELS.info,
-              timestamp: auction.timestamp,
-            }),
-            {
-              [argsType]: pickKeyFields(argsType, eventArgs)
+          logTrackEvent(eventType, prebidEventArgs);
+          const argsType = determineObjType(prebidEventArgs);
+          const auction = prebidEventArgs;
+          this.localContext.pushEventToAllBidContexts({
+            eventType,
+            level: DEBUG_EVENT_LEVELS.info,
+            timestamp: auction.timestamp,
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
-          );
+          });
           break;
         }
         case AUCTION_TIMEOUT:
-          logTrackEvent(eventType, eventArgs);
-          const argsType = determineObjType(eventArgs);
-          const auction = eventArgs;
-          this.localContext.pushEventToAllBidContexts(
-            new Event({
-              eventType,
-              level: DEBUG_EVENT_LEVELS.error,
-              timestamp: auction.timestamp,
-            }),
-            {
-              [argsType]: pickKeyFields(argsType, eventArgs)
+          logTrackEvent(eventType, prebidEventArgs);
+          const argsType = determineObjType(prebidEventArgs);
+          const auction = prebidEventArgs;
+          this.localContext.pushEventToAllBidContexts({
+            eventType,
+            level: DEBUG_EVENT_LEVELS.error,
+            timestamp: auction.timestamp,
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
-          );
+          });
           break;
         case NO_BID: {
-          logTrackEvent(eventType, eventArgs);
-          const argsType = determineObjType(eventArgs);
-          const event = new Event({
+          logTrackEvent(eventType, prebidEventArgs);
+          const argsType = determineObjType(prebidEventArgs);
+          this.localContext.pushEventToAllBidContexts({
             eventType,
             level: DEBUG_EVENT_LEVELS.warn,
-          });
-          this.localContext.pushEventToAllBidContexts(
-            event,
-            {
-              [argsType]: pickKeyFields(argsType, eventArgs)
+            timestamp: prebidEventArgs.timestamp || Date.now(),
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
-          );
+          });
           break;
         }
         case BID_REJECTED: {
-          logTrackEvent(eventType, eventArgs);
-          const argsType = determineObjType(eventArgs);
-          const prebidBid = eventArgs;
+          logTrackEvent(eventType, prebidEventArgs);
+          const argsType = determineObjType(prebidEventArgs);
+          const prebidBid = prebidEventArgs;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
-          bidContext.pushEvent(
-            new Event({
+          bidContext.pushEvent({
+            eventInstance: new Event({
               eventType,
+              impid: bidContext.impid,
               level: DEBUG_EVENT_LEVELS.warn,
+              timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
-            {
-              [argsType]: pickKeyFields(argsType, eventArgs)
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
-          );
+          });
           break;
         };
         case BIDDER_ERROR: {
-          logTrackEvent(eventType, eventArgs)
-          const argsType = determineObjType(eventArgs);
-          this.localContext.pushEventToAllBidContexts(
-            new Event({
-              eventType,
-              level: DEBUG_EVENT_LEVELS.warn,
-            }),
-            {
-              [argsType]: pickKeyFields(argsType, eventArgs)
+          logTrackEvent(eventType, prebidEventArgs)
+          const argsType = determineObjType(prebidEventArgs);
+          this.localContext.pushEventToAllBidContexts({
+            eventType,
+            level: DEBUG_EVENT_LEVELS.warn,
+            timestamp: prebidEventArgs.timestamp || Date.now(),
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
-          );
+          });
           break;
         }
         case AD_RENDER_FAILED: {
-          logTrackEvent(eventType, eventArgs);
-          const argsType = determineObjType(eventArgs);
-          const {bid: prebidBid} = eventArgs;
+          logTrackEvent(eventType, prebidEventArgs);
+          const argsType = determineObjType(prebidEventArgs);
+          const {bid: prebidBid} = prebidEventArgs;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
-          bidContext.pushEvent(
-            new Event({
+          bidContext.pushEvent({
+            eventInstance: new Event({
               eventType,
+              impid: bidContext.impid,
               level: DEBUG_EVENT_LEVELS.error,
+              timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
-            {
-              [argsType]: pickKeyFields(argsType, eventArgs)
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
-          );
+          });
           break;
         }
         case AD_RENDER_SUCCEEDED: {
-          logTrackEvent(eventType, eventArgs);
-          const argsType = determineObjType(eventArgs);
-          const prebidBid = eventArgs.bid;
+          logTrackEvent(eventType, prebidEventArgs);
+          const argsType = determineObjType(prebidEventArgs);
+          const prebidBid = prebidEventArgs.bid;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
-          bidContext.pushEvent(
-            new Event({
+          bidContext.pushEvent({
+            eventInstance: new Event({
               eventType,
+              impid: bidContext.impid,
               level: DEBUG_EVENT_LEVELS.info,
+              timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
-            {
-              [argsType]: pickKeyFields(argsType, eventArgs)
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
-          );
+          });
           break;
         }
         case BIDDER_DONE: {
-          logTrackEvent(eventType, eventArgs)
-          const argsType = determineObjType(eventArgs);
-          this.localContext.pushEventToAllBidContexts(
-            new Event({
-              eventType,
-              level: DEBUG_EVENT_LEVELS.info,
-              timestamp: eventArgs.timestamp,
-            }),
-            {
-              [argsType]: pickKeyFields(argsType, eventArgs)
+          logTrackEvent(eventType, prebidEventArgs)
+          const argsType = determineObjType(prebidEventArgs);
+          this.localContext.pushEventToAllBidContexts({
+            eventType,
+            level: DEBUG_EVENT_LEVELS.info,
+            timestamp: prebidEventArgs.timestamp || Date.now(),
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
-          );
+          });
           this.localContext.triggerAllLossBidLossBeacon();
           await this.localContext.flushAllDebugEvents();
           break;
@@ -554,24 +616,23 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           break;
       }
     } catch (error) {
-      // If there is an unexpected error, log the error and submit the error to
-      // the server for debugging.
-      this.localContext.pushEventToAllBidContexts(
-        new Event({
-          eventType,
-          level: DEBUG_EVENT_LEVELS.error,
-          timestamp: eventArgs.timestamp,
-          note: 'Error occurred when processing this event.',
-        }),
-        {
+      // If there is an unexpected error, such as a syntax error, we log
+      // log the error and submit the error to the server for debugging.
+      this.localContext.pushEventToAllBidContexts({
+        eventType,
+        level: DEBUG_EVENT_LEVELS.error,
+        timestamp: prebidEventArgs.timestamp || Date.now(),
+        note: 'Error occurred when processing this event.',
+        payload: {
           // Include the entire object for debugging
-          [`${eventType}_caughtError`]: {
+          [`errorInEvent_${eventType}`]: {
             // Some fields contain large data. Omits them to reduce payload size
-            eventArgs: omitRecursive(eventArgs, COMMON_FIELDS_TO_OMIT),
+            eventArgs: omitRecursive(prebidEventArgs, COMMON_FIELDS_TO_OMIT),
             error: error.message,
           }
         }
-      );
+      });
+      // Throw the error to skip the current Prebid event
       throw error;
     }
   }
@@ -666,7 +727,7 @@ class BidContext {
    * @param {*} newValues Object containing new values to be merged
    */
   mergePayload(newValues) {
-    mergeDeep(this._payload, newValues);
+    mergePayloadAndSetImpid(this._payload, newValues, this.impid);
   }
 
   /**
@@ -740,16 +801,21 @@ class BidContext {
 
   /**
    * Push a debug event to the context which will submitted to server for debugging.
-   * @param {*} bugEvent DebugEvent object
+   * @param {*} eventInstance DebugEvent object. If it does not contain the same
+   * impid as the BidContext, event will be ignored.
    * @param {*} payload Field values from event args that are useful for
    * debugging. Payload cross events will merge into one object.
    */
-  pushEvent(bugEvent, payload = undefined) {
-    if (!(bugEvent instanceof Event)) {
+  pushEvent({eventInstance, payload = undefined}) {
+    if (!(eventInstance instanceof Event)) {
       throw new Error('bugEvent must be an instance of DebugEvent');
     }
-    this.events.push(bugEvent);
+    if (eventInstance.impid != this.impid) {
+      // Ignore the event if the impression ID is not matched.
+      return;
+    }
 
+    this.events.push(eventInstance);
     if (payload) {
       this.mergePayload(payload);
     }
@@ -760,19 +826,44 @@ class BidContext {
  * A class to represent an event happened in the bid processing lifecycle.
  */
 class Event {
-  constructor({eventType, level, timestamp = undefined, note = undefined}) {
+  /**
+   * Impression ID must set before appending to event lists.
+   */
+  impid = null;
+
+  /**
+   * Prebid Event Type or Custom Event Type
+   */
+  eventType = null;
+  /**
+   * Debug level of the event. It can be one of the following:
+   * - info
+   * - warn
+   * - error
+   */
+  level = null;
+  /**
+   * Timestamp of the event. It represents the time when the event occurred.
+   */
+  timestamp = null;
+
+  constructor({eventType, impid, level, timestamp, note = undefined}) {
     if (!eventType) {
       throw new Error('eventType is required');
+    }
+    if (!impid) {
+      throw new Error('Impression ID is required');
     }
     if (!DEBUG_EVENT_LEVELS[level]) {
       throw new Error(`Event level must be one of ${Object.keys(DEBUG_EVENT_LEVELS).join(', ')}. Given: "${level}"`);
     }
-    if (timestamp && typeof timestamp !== 'number') {
+    if (typeof timestamp !== 'number') {
       throw new Error('Timestamp must be a number');
     }
     this.eventType = eventType;
+    this.impid = impid;
     this.level = level;
-    this.timestamp = timestamp || Date.now();
+    this.timestamp = timestamp;
     if (note) {
       this.note = note;
     }
@@ -882,20 +973,6 @@ function getOrtbId(bid) {
 }
 
 /**
- * Safely get ORTB ID from a bid object. If the ID is not available, it will
- * return null.
- * @param {*} obj
- * @returns string | null
- */
-function safeGetOrtbId(obj) {
-  try {
-    return getOrtbId(obj);
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
  * Impression ID is named differently in different objects. This function will
  * return the impression ID from the given bid object.
  * @param {*} bid ORTB bid response or Prebid bid response or Prebid bid request
@@ -989,6 +1066,40 @@ function determineObjType(eventArgs) {
   }
 
   return objType;
+}
+
+/**
+ * Merge the given object into the target object. This function will set
+ * impression ID in the payload object to ensure each payload object has the
+ * impression ID for identification.
+ * @param {*} target Object that will be updated in-place
+ * @param {*} newValues Object containing new values to be merged
+ * @param {*} impid Impression ID to be set in the payload object. It is to
+ * ensure each payload object has the impression ID for identification.
+ */
+function mergePayloadAndSetImpid(target, newValues, impid) {
+  if (typeof target !== 'object') {
+    throw new Error('Target must be an object');
+  }
+
+  if (typeof newValues !== 'object') {
+    throw new Error('New values must be an object');
+  }
+
+  if (impid && typeof impid !== 'string') {
+    throw new Error('Impression ID must be a string');
+  }
+
+  // Ensure the impid is set in the payload object
+  _each(newValues, (value) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      if (!value.impid) {
+        value.impid = impid;
+      }
+    }
+  });
+
+  mergeDeep(target, newValues);
 }
 
 /**
