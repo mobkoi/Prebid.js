@@ -489,20 +489,6 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           });
           break;
         }
-        case AUCTION_END: {
-          logTrackEvent(eventType, prebidEventArgs);
-          const argsType = determineObjType(prebidEventArgs);
-          const auction = prebidEventArgs;
-          this.localContext.pushEventToAllBidContexts({
-            eventType,
-            level: DEBUG_EVENT_LEVELS.info,
-            timestamp: auction.timestamp,
-            payload: {
-              [argsType]: pickKeyFields(argsType, prebidEventArgs)
-            }
-          });
-          break;
-        }
         case AUCTION_TIMEOUT:
           logTrackEvent(eventType, prebidEventArgs);
           const argsType = determineObjType(prebidEventArgs);
@@ -538,8 +524,9 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
-              level: DEBUG_EVENT_LEVELS.warn,
+              level: DEBUG_EVENT_LEVELS.error,
               timestamp: prebidEventArgs.timestamp || Date.now(),
+              note: prebidEventArgs.rejectionReason,
             }),
             payload: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
@@ -590,6 +577,20 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
               level: DEBUG_EVENT_LEVELS.info,
               timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
+            payload: {
+              [argsType]: pickKeyFields(argsType, prebidEventArgs)
+            }
+          });
+          break;
+        }
+        case AUCTION_END: {
+          logTrackEvent(eventType, prebidEventArgs);
+          const argsType = determineObjType(prebidEventArgs);
+          const auction = prebidEventArgs;
+          this.localContext.pushEventToAllBidContexts({
+            eventType,
+            level: DEBUG_EVENT_LEVELS.info,
+            timestamp: auction.timestamp,
             payload: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
