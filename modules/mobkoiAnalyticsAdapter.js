@@ -11,8 +11,10 @@ import {
   triggerPixel,
   debugTurnedOn,
   mergeDeep,
-  isEmpty
+  isEmpty,
+  deepClone
 } from '../src/utils.js';
+import { valid } from 'node-html-parser';
 
 const BIDDER_CODE = 'mobkoi';
 const analyticsType = 'endpoint';
@@ -87,14 +89,29 @@ class LocalContext {
   /**
    * Update the payload for all impressions. The new values will be merged to
    * the existing payload.
-   * @param {*} newValues Object containing new values to be merged
+   * @param {*} subPayloads Object containing new values to be merged indexed by SUB_PAYLOAD_TYPES
    */
-  mergeToAllImpressionsPayload(newValues) {
+  mergeToAllImpressionsPayload(subPayloads) {
+    // Create clone for each impression ID and update the payload cache
     _each(this.getAllBidderRequestImpIds(), currentImpid => {
+      // Avoid modifying the original object
+      const cloneSubPayloads = deepClone(subPayloads);
+
+      // Initialise the payload cache if it doesn't exist
       if (!this._impressionPayloadCache[currentImpid]) {
         this._impressionPayloadCache[currentImpid] = {};
       }
-      mergePayloadAndSetImpid(this._impressionPayloadCache[currentImpid], newValues, currentImpid);
+
+      // Merge the new values to the existing payload
+      utils.mergePayloadAndAddCustomFields(
+        this._impressionPayloadCache[currentImpid],
+        cloneSubPayloads,
+        // Add the identity fields to all sub payloads
+        {
+          impid: currentImpid,
+          publisherId: initOptions.publisherId,
+        }
+      );
     });
   }
 
@@ -116,7 +133,7 @@ class LocalContext {
     if (!Array.isArray(this.bidderRequests)) {
       return [];
     }
-    return this.bidderRequests.flatMap(br => br.bids.map(bid => getImpId(bid)));
+    return this.bidderRequests.flatMap(br => br.bids.map(bid => utils.getImpId(bid)));
   }
 
   /**
@@ -140,11 +157,11 @@ class LocalContext {
   retrieveBidContext(bid) {
     const ortbId = (() => {
       try {
-        const id = getOrtbId(bid);
+        const id = utils.getOrtbId(bid);
         if (!id) {
           throw new Error(
             'ORTB ID is not available in the given bid object:' +
-            JSON.stringify(omitRecursive(bid, COMMON_FIELDS_TO_OMIT), null, 2));
+            JSON.stringify(utils.omitRecursive(bid, COMMON_FIELDS_TO_OMIT), null, 2));
         }
         return id;
       } catch (error) {
@@ -173,11 +190,13 @@ class LocalContext {
      */
     _each(
       this.commonBidContextEvents,
-      event => newBidContext.pushEvent({
-        eventInstance: event,
-      })
+      event => newBidContext.pushEvent(
+        {
+          eventInstance: event,
+          subPayloads: null, // Merge the payload later
+        })
     );
-    // Merge common payload to the new bid context
+    // Merge cached payloads to the new bid context
     newBidContext.mergePayload(this.getImpressionPayload(newBidContext.impid));
 
     this.bidContexts[ortbId] = newBidContext;
@@ -192,7 +211,7 @@ class LocalContext {
       const { ortbBidResponse, bidWin, lurlTriggered } = bidContext;
       if (ortbBidResponse.lurl && !bidWin && !lurlTriggered) {
         logInfo('TriggerLossBeacon. impid:', ortbBidResponse.impid);
-        sendGetRequest(ortbBidResponse.lurl);
+        utils.sendGetRequest(ortbBidResponse.lurl);
         // Update the flog. Don't wait for the response to continue to avoid race conditions
         bidContext.lurlTriggered = true;
       }
@@ -212,19 +231,20 @@ class LocalContext {
    * @param {*} payload Field values from event args that are useful for
    * debugging. Payload cross events will merge into one object.
    */
-  pushEventToAllBidContexts({eventType, level, timestamp, note, payload}) {
+  pushEventToAllBidContexts({eventType, level, timestamp, note, subPayloads}) {
     // Create one event for each impression ID
     _each(this.getAllBidderRequestImpIds(), impid => {
       const eventClone = new Event({
         eventType,
         impid,
+        publisherId: initOptions.publisherId,
         level,
         timestamp,
         note,
       });
       // Save to the LocalContext
       this.commonBidContextEvents.push(eventClone);
-      this.mergeToAllImpressionsPayload(payload);
+      this.mergeToAllImpressionsPayload(subPayloads);
     });
 
     // If there are no bid contexts, push the event to the common events list
@@ -239,11 +259,12 @@ class LocalContext {
         eventInstance: new Event({
           eventType,
           impid: bidContext.impid,
+          publisherId: initOptions.publisherId,
           level,
           timestamp,
           note,
         }),
-        payload: this.getImpressionPayload(bidContext.impid),
+        subPayloads: this.getImpressionPayload(bidContext.impid),
       });
     });
   }
@@ -279,7 +300,7 @@ class LocalContext {
       logInfo('Flush common events to the server');
       const debugReports = this.bidderRequests.flatMap(currentBidderRequest => {
         return currentBidderRequest.bids.map(bid => {
-          const impid = getImpId(bid);
+          const impid = utils.getImpId(bid);
           return {
             impid: impid,
             events: this.commonBidContextEvents,
@@ -292,7 +313,7 @@ class LocalContext {
       });
 
       _each(debugReports, debugReport => {
-        flushPromises.push(postAjax(
+        flushPromises.push(utils.postAjax(
           `${initOptions.endpoint}/debug`,
           debugReport
         ));
@@ -305,7 +326,7 @@ class LocalContext {
       ...Object.values(this.bidContexts)
         .map(async (currentBidContext) => {
           logInfo('Flush bid context events to the server', currentBidContext);
-          return postAjax(
+          return utils.postAjax(
             `${initOptions.endpoint}/debug`,
             {
               impid: currentBidContext.impid,
@@ -313,7 +334,7 @@ class LocalContext {
               events: currentBidContext.events,
               // Unroll the payload object to the top level to make it easier for
               // Grafana to process the data.
-              ...currentBidContext.payload,
+              ...currentBidContext.subPayloads,
             }
           );
         }));
@@ -324,7 +345,7 @@ class LocalContext {
 
 /**
  * Select key fields from the given object based on the object type. This is
- * useful for debugging to reduce the size of the payload.
+ * useful for debugging to reduce the size of the API call payload.
  * @param {*} objType The custom type of the object. Return by determineObjType function.
  * @param {*} eventArgs The args object that is passed in to the event handler
  * or any supported object.
@@ -332,7 +353,7 @@ class LocalContext {
  */
 function pickKeyFields(objType, eventArgs) {
   switch (objType) {
-    case OBJECT_TYPES.AUCTION: {
+    case SUB_PAYLOAD_TYPES.AUCTION: {
       return pick(eventArgs, [
         'auctionId',
         'adUnitCodes',
@@ -344,7 +365,7 @@ function pickKeyFields(objType, eventArgs) {
         'timestamp',
       ]);
     }
-    case OBJECT_TYPES.BIDDER_REQUEST: {
+    case SUB_PAYLOAD_TYPES.BIDDER_REQUEST: {
       return pick(eventArgs, [
         'auctionId',
         'bidId',
@@ -353,12 +374,12 @@ function pickKeyFields(objType, eventArgs) {
         'timeout'
       ]);
     }
-    case OBJECT_TYPES.ORTB_BID: {
+    case SUB_PAYLOAD_TYPES.ORTB_BID: {
       return pick(eventArgs, [
         'impid', 'id', 'price', 'cur', 'crid', 'cid', 'lurl', 'cpm'
       ]);
     }
-    case OBJECT_TYPES.PREBID_RESPONSE_INTERPRETED: {
+    case SUB_PAYLOAD_TYPES.PREBID_RESPONSE_INTERPRETED: {
       return {
         ...pick(eventArgs, [
           'requestId',
@@ -384,23 +405,23 @@ function pickKeyFields(objType, eventArgs) {
         ]),
       };
     }
-    case OBJECT_TYPES.PREBID_BID_REQUEST: {
+    case SUB_PAYLOAD_TYPES.PREBID_BID_REQUEST: {
       return {
         ...pick(eventArgs, [
           'bidderRequestId'
         ]),
         bids: eventArgs.bids.map(
-          bid => pickKeyFields(OBJECT_TYPES.PREBID_RESPONSE_NOT_INTERPRETED, bid)
+          bid => pickKeyFields(SUB_PAYLOAD_TYPES.PREBID_RESPONSE_NOT_INTERPRETED, bid)
         ),
       };
     }
-    case OBJECT_TYPES.AD_DOC_AND_PREBID_BID: {
+    case SUB_PAYLOAD_TYPES.AD_DOC_AND_PREBID_BID: {
       return {
         // bid: 'Not included to reduce payload size',
         doc: pick(eventArgs.doc, ['visibilityState', 'readyState', 'hidden']),
       };
     }
-    case OBJECT_TYPES.AD_DOC_AND_PREBID_BID_WITH_ERROR: {
+    case SUB_PAYLOAD_TYPES.AD_DOC_AND_PREBID_BID_WITH_ERROR: {
       return {
         // bid: 'Not included to reduce payload size',
         reason: eventArgs.reason,
@@ -408,9 +429,9 @@ function pickKeyFields(objType, eventArgs) {
         doc: pick(eventArgs.doc, ['visibilityState', 'readyState', 'hidden']),
       }
     }
-    case OBJECT_TYPES.BIDDER_ERROR_ARGS: {
+    case SUB_PAYLOAD_TYPES.BIDDER_ERROR_ARGS: {
       return {
-        bidderRequest: pickKeyFields(OBJECT_TYPES.BIDDER_REQUEST, eventArgs.bidderRequest),
+        bidderRequest: pickKeyFields(SUB_PAYLOAD_TYPES.BIDDER_REQUEST, eventArgs.bidderRequest),
         error: eventArgs.error?.toJSON ? eventArgs.error?.toJSON()
           : (eventArgs.error || 'Failed to convert error object to JSON'),
       };
@@ -431,44 +452,45 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
     try {
       switch (eventType) {
         case AUCTION_INIT: {
-          logTrackEvent(eventType, prebidEventArgs);
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs);
+          const argsType = utils.determineObjType(prebidEventArgs);
           const auction = prebidEventArgs;
           this.localContext.initialise(auction);
           this.localContext.pushEventToAllBidContexts({
             eventType,
             level: DEBUG_EVENT_LEVELS.info,
             timestamp: auction.timestamp,
-            payload: {
+            subPayloads: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
           });
           break;
         }
         case BID_RESPONSE: {
-          logTrackEvent(eventType, prebidEventArgs);
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs);
+          const argsType = utils.determineObjType(prebidEventArgs);
           const prebidBid = prebidEventArgs;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
           bidContext.pushEvent({
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
+              publisherId: initOptions.publisherId,
               level: DEBUG_EVENT_LEVELS.info,
               timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
-            payload: {
+            subPayloads: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs),
-              [OBJECT_TYPES.ORTB_BID]: pickKeyFields(OBJECT_TYPES.ORTB_BID, prebidEventArgs.ortbBidResponse),
+              [SUB_PAYLOAD_TYPES.ORTB_BID]: pickKeyFields(SUB_PAYLOAD_TYPES.ORTB_BID, prebidEventArgs.ortbBidResponse),
             }
           });
           break;
         }
         case BID_WON: {
-          logTrackEvent(eventType, prebidEventArgs);
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs);
+          const argsType = utils.determineObjType(prebidEventArgs);
           const prebidBid = prebidEventArgs;
-          if (isMobkoiBid(prebidBid)) {
+          if (utils.isMobkoiBid(prebidBid)) {
             this.localContext.retrieveBidContext(prebidBid).bidWin = true;
           }
           // Notify the server that the bidding results.
@@ -479,10 +501,11 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
               eventInstance: new Event({
                 eventType: currentBidContext.bidWin ? eventType : CUSTOM_EVENTS.BID_LOSS,
                 impid: currentBidContext.impid,
+                publisherId: initOptions.publisherId,
                 level: DEBUG_EVENT_LEVELS.info,
                 timestamp: prebidEventArgs.timestamp || Date.now(),
               }),
-              payload: {
+              subPayloads: {
                 [argsType]: pickKeyFields(argsType, prebidEventArgs),
               }
             });
@@ -490,121 +513,124 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
           break;
         }
         case AUCTION_TIMEOUT:
-          logTrackEvent(eventType, prebidEventArgs);
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs);
+          const argsType = utils.determineObjType(prebidEventArgs);
           const auction = prebidEventArgs;
           this.localContext.pushEventToAllBidContexts({
             eventType,
             level: DEBUG_EVENT_LEVELS.error,
             timestamp: auction.timestamp,
-            payload: {
+            subPayloads: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
           });
           break;
         case NO_BID: {
-          logTrackEvent(eventType, prebidEventArgs);
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs);
+          const argsType = utils.determineObjType(prebidEventArgs);
           this.localContext.pushEventToAllBidContexts({
             eventType,
             level: DEBUG_EVENT_LEVELS.warn,
             timestamp: prebidEventArgs.timestamp || Date.now(),
-            payload: {
+            subPayloads: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
           });
           break;
         }
         case BID_REJECTED: {
-          logTrackEvent(eventType, prebidEventArgs);
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs);
+          const argsType = utils.determineObjType(prebidEventArgs);
           const prebidBid = prebidEventArgs;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
           bidContext.pushEvent({
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
+              publisherId: initOptions.publisherId,
               level: DEBUG_EVENT_LEVELS.error,
               timestamp: prebidEventArgs.timestamp || Date.now(),
               note: prebidEventArgs.rejectionReason,
             }),
-            payload: {
+            subPayloads: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
           });
           break;
         };
         case BIDDER_ERROR: {
-          logTrackEvent(eventType, prebidEventArgs)
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs)
+          const argsType = utils.determineObjType(prebidEventArgs);
           this.localContext.pushEventToAllBidContexts({
             eventType,
             level: DEBUG_EVENT_LEVELS.warn,
             timestamp: prebidEventArgs.timestamp || Date.now(),
-            payload: {
+            subPayloads: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
           });
           break;
         }
         case AD_RENDER_FAILED: {
-          logTrackEvent(eventType, prebidEventArgs);
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs);
+          const argsType = utils.determineObjType(prebidEventArgs);
           const {bid: prebidBid} = prebidEventArgs;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
           bidContext.pushEvent({
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
+              publisherId: initOptions.publisherId,
               level: DEBUG_EVENT_LEVELS.error,
               timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
-            payload: {
+            subPayloads: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
           });
           break;
         }
         case AD_RENDER_SUCCEEDED: {
-          logTrackEvent(eventType, prebidEventArgs);
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs);
+          const argsType = utils.determineObjType(prebidEventArgs);
           const prebidBid = prebidEventArgs.bid;
           const bidContext = this.localContext.retrieveBidContext(prebidBid);
           bidContext.pushEvent({
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
+              publisherId: initOptions.publisherId,
               level: DEBUG_EVENT_LEVELS.info,
               timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
-            payload: {
+            subPayloads: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
           });
           break;
         }
         case AUCTION_END: {
-          logTrackEvent(eventType, prebidEventArgs);
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs);
+          const argsType = utils.determineObjType(prebidEventArgs);
           const auction = prebidEventArgs;
           this.localContext.pushEventToAllBidContexts({
             eventType,
             level: DEBUG_EVENT_LEVELS.info,
             timestamp: auction.timestamp,
-            payload: {
+            subPayloads: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
           });
           break;
         }
         case BIDDER_DONE: {
-          logTrackEvent(eventType, prebidEventArgs)
-          const argsType = determineObjType(prebidEventArgs);
+          utils.logTrackEvent(eventType, prebidEventArgs)
+          const argsType = utils.determineObjType(prebidEventArgs);
           this.localContext.pushEventToAllBidContexts({
             eventType,
             level: DEBUG_EVENT_LEVELS.info,
             timestamp: prebidEventArgs.timestamp || Date.now(),
-            payload: {
+            subPayloads: {
               [argsType]: pickKeyFields(argsType, prebidEventArgs)
             }
           });
@@ -624,11 +650,11 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
         level: DEBUG_EVENT_LEVELS.error,
         timestamp: prebidEventArgs.timestamp || Date.now(),
         note: 'Error occurred when processing this event.',
-        payload: {
+        subPayloads: {
           // Include the entire object for debugging
           [`errorInEvent_${eventType}`]: {
-            // Some fields contain large data. Omits them to reduce payload size
-            eventArgs: omitRecursive(prebidEventArgs, COMMON_FIELDS_TO_OMIT),
+            // Some fields contain large data. Omits them to reduce API call payload size
+            eventArgs: utils.omitRecursive(prebidEventArgs, COMMON_FIELDS_TO_OMIT),
             error: error.message,
           }
         }
@@ -681,10 +707,10 @@ class BidContext {
     } else if (this.prebidBidRequest) {
       return this.prebidBidRequest.bidId;
     } else if (
-      this.payload &&
-      getImpId(this.payload)
+      this.subPayloads &&
+      utils.getImpId(this.subPayloads)
     ) {
-      return getImpId(this.payload);
+      return utils.getImpId(this.subPayloads);
     } else {
       throw new Error('ORTB bid response and Prebid bid response are not available for extracting Impression ID');
     }
@@ -695,11 +721,11 @@ class BidContext {
    */
   get ortbId() {
     if (this.ortbBidResponse) {
-      return getOrtbId(this.ortbBidResponse);
+      return utils.getOrtbId(this.ortbBidResponse);
     } else if (this.prebidBidResponse) {
-      return getOrtbId(this.prebidBidResponse);
-    } else if (this.payload) {
-      return getOrtbId(this.payload);
+      return utils.getOrtbId(this.prebidBidResponse);
+    } else if (this.subPayloads) {
+      return utils.getOrtbId(this.subPayloads);
     } else {
       throw new Error('ORTB bid response and Prebid bid response are not available for extracting ORTB ID');
     }
@@ -718,17 +744,34 @@ class BidContext {
       .find(bidRequest => bidRequest.bidId === this.prebidBidResponse.requestId);
   }
 
-  _payload = null;
-  get payload() {
-    return this._payload;
+  /**
+   * To avoid overriding the subPayloads object, we merge the new values to the
+   * existing subPayloads object.
+   */
+  _subPayloads = null;
+  /**
+   * A group of payloads that are useful for debugging. The payloads are indexed
+   * by SUB_PAYLOAD_TYPES.
+   */
+  get subPayloads() {
+    return this._subPayloads;
   }
   /**
-   * To avoid overriding the payload object, we merge the new values to the
-   * existing payload object.
-   * @param {*} newValues Object containing new values to be merged
+   * To avoid overriding the subPayloads object, we merge the new values to the
+   * existing subPayloads object. Identity fields will automatically added to the
+   * new values.
+   * @param {*} newSubPayloads Object containing new values to be merged
    */
-  mergePayload(newValues) {
-    mergePayloadAndSetImpid(this._payload, newValues, this.impid);
+  mergePayload(newSubPayloads) {
+    utils.mergePayloadAndAddCustomFields(
+      this._subPayloads,
+      newSubPayloads,
+      // Add the identity fields to all sub payloads
+      {
+        impid: this.impid,
+        publisherId: initOptions.publisherId,
+      }
+    );
   }
 
   /**
@@ -773,30 +816,30 @@ class BidContext {
     prebidOrOrtbBidResponse: bidResponse,
   }) {
     this.localContext = localContext;
-    this._payload = {};
+    this._subPayloads = {};
 
     if (!bidResponse) {
       throw new Error('prebidOrOrtbBidResponse field is required');
     }
 
-    const objType = determineObjType(bidResponse);
-    if (![OBJECT_TYPES.ORTB_BID, OBJECT_TYPES.PREBID_RESPONSE_INTERPRETED].includes(objType)) {
+    const objType = utils.determineObjType(bidResponse);
+    if (![SUB_PAYLOAD_TYPES.ORTB_BID, SUB_PAYLOAD_TYPES.PREBID_RESPONSE_INTERPRETED].includes(objType)) {
       throw new Error(
         'Unable to create a new Bid Context as the given object is not a bid response object. ' +
         'Expect a Prebid Bid Object or ORTB Bid Object. Given object:\n' +
-        JSON.stringify(omitRecursive(bidResponse, COMMON_FIELDS_TO_OMIT), null, 2)
+        JSON.stringify(utils.omitRecursive(bidResponse, COMMON_FIELDS_TO_OMIT), null, 2)
       );
     }
 
-    if (objType === OBJECT_TYPES.ORTB_BID) {
+    if (objType === SUB_PAYLOAD_TYPES.ORTB_BID) {
       this.ortbBidResponse = bidResponse;
       this.prebidBidResponse = null;
-    } else if (objType === OBJECT_TYPES.PREBID_RESPONSE_INTERPRETED) {
+    } else if (objType === SUB_PAYLOAD_TYPES.PREBID_RESPONSE_INTERPRETED) {
       this.ortbBidResponse = bidResponse.ortbBidResponse;
       this.prebidBidResponse = bidResponse;
     } else {
       throw new Error('Expect a Prebid Bid Object or ORTB Bid Object. Given object:\n' +
-        JSON.stringify(omitRecursive(bidResponse, COMMON_FIELDS_TO_OMIT), null, 2));
+        JSON.stringify(utils.omitRecursive(bidResponse, COMMON_FIELDS_TO_OMIT), null, 2));
     }
   }
 
@@ -804,10 +847,10 @@ class BidContext {
    * Push a debug event to the context which will submitted to server for debugging.
    * @param {*} eventInstance DebugEvent object. If it does not contain the same
    * impid as the BidContext, event will be ignored.
-   * @param {*} payload Field values from event args that are useful for
-   * debugging. Payload cross events will merge into one object.
+   * @param {*} subPayloads Object contains various payloads that obtained form
+   * the Prebid Event args. The payloads will be merged to the existing subPayloads.
    */
-  pushEvent({eventInstance, payload = undefined}) {
+  pushEvent({eventInstance, subPayloads}) {
     if (!(eventInstance instanceof Event)) {
       throw new Error('bugEvent must be an instance of DebugEvent');
     }
@@ -815,10 +858,15 @@ class BidContext {
       // Ignore the event if the impression ID is not matched.
       return;
     }
+    // Accept only object or null
+    if (subPayloads !== null && typeof subPayloads !== 'object') {
+      throw new Error('subPayloads must be an object or null');
+    }
 
     this.events.push(eventInstance);
-    if (payload) {
-      this.mergePayload(payload);
+
+    if (subPayloads !== null) {
+      this.mergePayload(subPayloads);
     }
   }
 }
@@ -831,6 +879,11 @@ class Event {
    * Impression ID must set before appending to event lists.
    */
   impid = null;
+
+  /**
+   * Publisher ID. It is a unique identifier for the publisher.
+   */
+  publisherId = null;
 
   /**
    * Prebid Event Type or Custom Event Type
@@ -848,13 +901,18 @@ class Event {
    */
   timestamp = null;
 
-  constructor({eventType, impid, level, timestamp, note = undefined}) {
+  constructor({eventType, impid, publisherId, level, timestamp, note = undefined}) {
     if (!eventType) {
       throw new Error('eventType is required');
     }
     if (!impid) {
-      throw new Error('Impression ID is required');
+      throw new Error(`Impression ID is required. Given: "${impid}"`);
     }
+
+    if (typeof publisherId !== 'string') {
+      throw new Error(`Publisher ID must be a string. Given: "${publisherId}"`);
+    }
+
     if (!DEBUG_EVENT_LEVELS[level]) {
       throw new Error(`Event level must be one of ${Object.keys(DEBUG_EVENT_LEVELS).join(', ')}. Given: "${level}"`);
     }
@@ -863,6 +921,7 @@ class Event {
     }
     this.eventType = eventType;
     this.impid = impid;
+    this.publisherId = publisherId;
     this.level = level;
     this.timestamp = timestamp;
     if (note) {
@@ -881,127 +940,10 @@ class Event {
 }
 
 /**
- * Make a POST request to the given URL with the given data.
- * @param {*} url
- * @param {*} data JSON data
- * @returns
- */
-async function postAjax(url, data) {
-  return new Promise((resolve, reject) => {
-    try {
-      logInfo('postAjax:', url, data);
-      ajax(url, resolve, JSON.stringify(data), {
-        contentType: 'application/json',
-        method: 'POST',
-        withCredentials: false, // No user-specific data is tied to the request
-        referrerPolicy: 'unsafe-url',
-        crossOrigin: true
-      });
-    } catch (error) {
-      reject(new Error(
-        `Failed to make post request to endpoint "${url}". With data: ` +
-        JSON.stringify(omitRecursive(data, COMMON_FIELDS_TO_OMIT), null, 2),
-        { error: error.message }
-      ));
-    }
-  });
-}
-
-/**
- * Make a GET request to the given URL. If the request fails, it will fall back
- * to AJAX request.
- * @param {*} url URL with the query string
- * @returns
- */
-async function sendGetRequest(url) {
-  return new Promise((resolve, reject) => {
-    try {
-      logInfo('triggerPixel', url);
-      triggerPixel(url, resolve);
-    } catch (error) {
-      try {
-        logWarn(`triggerPixel failed. URL: (${url}) Falling back to ajax. Error: `, error);
-        ajax(url, resolve, null, {
-          contentType: 'application/json',
-          method: 'GET',
-          withCredentials: false, // No user-specific data is tied to the request
-          referrerPolicy: 'unsafe-url',
-          crossOrigin: true
-        });
-      } catch (error) {
-        // If failed with both methods, reject the promise
-        reject(error);
-      }
-    }
-  });
-}
-
-function isMobkoiBid(prebidBid) {
-  return prebidBid && prebidBid.bidderCode === BIDDER_CODE;
-}
-
-/**
- * The primary ID we use for identifying bid requests and responses.
- * Get ORTB ID from Prebid Bid response or ORTB bid response object.
- */
-function getOrtbId(bid) {
-  if (bid.id) {
-    if (debugTurnedOn()) {
-      try {
-        const objType = determineObjType(bid);
-        if (!objType === OBJECT_TYPES.ORTB_BID) {
-          logWarn(
-            `Given object is not an ORTB bid response. Given object type: ${objType}.`,
-            bid
-          );
-        }
-      } catch (error) {
-        logWarn('Error when determining object type. Given object:', bid);
-      }
-    }
-    // If it's an ORTB bid response
-    return bid.id;
-  } else if (bid.ortbId) {
-    // If it's a Prebid bid response
-    return bid.ortbId;
-  } else if (bid.ortbBidResponse && bid.ortbBidResponse.id) {
-    // If it's a Prebid bid response with ORTB response. i.e. interpreted response
-    return bid.ortbBidResponse.id;
-  } else {
-    throw new Error('Not a valid bid object. Given object:\n' +
-      JSON.stringify(omitRecursive(bid, COMMON_FIELDS_TO_OMIT), null, 2));
-  }
-}
-
-/**
- * Impression ID is named differently in different objects. This function will
- * return the impression ID from the given bid object.
- * @param {*} bid ORTB bid response or Prebid bid response or Prebid bid request
- * @returns string | null
- */
-function getImpId(bid) {
-  return (bid && (bid.impid || bid.requestId || bid.bidId)) || null;
-}
-
-function logTrackEvent(eventType, eventArgs) {
-  if (!debugTurnedOn()) {
-    return;
-  }
-  const argsType = (() => {
-    try {
-      return determineObjType(eventArgs);
-    } catch (error) {
-      logError(`Error when logging track event: [${eventType}]\n`, error);
-      return 'Unknown';
-    }
-  })();
-  logInfo(`Track event: [${eventType}]. Args Type Determination: ${argsType}`, eventArgs);
-}
-
-/**
- * Various types of objects that provided by Prebid tracking events.
- */
-const OBJECT_TYPES = {
+   * Various types of payloads that are submitted to the server for debugging.
+   * Mostly they are obtain from the Prebid event args.
+   */
+const SUB_PAYLOAD_TYPES = {
   AUCTION: 'prebid_auction',
   BIDDER_REQUEST: 'bidder_request',
   ORTB_BID: 'ortb_bid',
@@ -1014,117 +956,307 @@ const OBJECT_TYPES = {
 };
 
 /**
- * Fields that are unique to objects used to identify the object type.
+ * Fields that are unique to objects used to identify the sub-payload type.
  */
-const OBJECT_TYPES_UNIQUE_FIELDS = {
-  [OBJECT_TYPES.AUCTION]: ['auctionStatus'],
-  [OBJECT_TYPES.BIDDER_REQUEST]: ['bidderRequestId'],
-  [OBJECT_TYPES.ORTB_BID]: ['adm', 'impid'],
-  [OBJECT_TYPES.PREBID_RESPONSE_INTERPRETED]: ['requestId', 'ortbBidResponse'],
-  [OBJECT_TYPES.PREBID_RESPONSE_NOT_INTERPRETED]: ['requestId'], // This must be paste under PREBID_RESPONSE_INTERPRETED
-  [OBJECT_TYPES.PREBID_BID_REQUEST]: ['bidId'],
-  [OBJECT_TYPES.AD_DOC_AND_PREBID_BID]: ['doc', 'bid'],
-  [OBJECT_TYPES.AD_DOC_AND_PREBID_BID_WITH_ERROR]: ['bid', 'reason', 'message'],
-  [OBJECT_TYPES.BIDDER_ERROR_ARGS]: ['error', 'bidderRequest'],
+const SUB_PAYLOAD_UNIQUE_FIELDS_LOOKUP = {
+  [SUB_PAYLOAD_TYPES.AUCTION]: ['auctionStatus'],
+  [SUB_PAYLOAD_TYPES.BIDDER_REQUEST]: ['bidderRequestId'],
+  [SUB_PAYLOAD_TYPES.ORTB_BID]: ['adm', 'impid'],
+  [SUB_PAYLOAD_TYPES.PREBID_RESPONSE_INTERPRETED]: ['requestId', 'ortbBidResponse'],
+  [SUB_PAYLOAD_TYPES.PREBID_RESPONSE_NOT_INTERPRETED]: ['requestId'], // This must be paste under PREBID_RESPONSE_INTERPRETED
+  [SUB_PAYLOAD_TYPES.PREBID_BID_REQUEST]: ['bidId'],
+  [SUB_PAYLOAD_TYPES.AD_DOC_AND_PREBID_BID]: ['doc', 'bid'],
+  [SUB_PAYLOAD_TYPES.AD_DOC_AND_PREBID_BID_WITH_ERROR]: ['bid', 'reason', 'message'],
+  [SUB_PAYLOAD_TYPES.BIDDER_ERROR_ARGS]: ['error', 'bidderRequest'],
 };
 
 /**
- * Determine the type of the given object based on the object's fields.
- * This is useful for identifying the type of object that is passed in to the
- * handler functions.
- * @param {*} eventArgs
- * @returns string
+ * Required fields for the sub payloads. The property value defines the type of the required field.
  */
-function determineObjType(eventArgs) {
-  if (typeof eventArgs !== 'object' || eventArgs === null) {
-    throw new Error(
-      'determineObjType: Expect an object. Given object is not an object or null. Given object:' +
-      JSON.stringify(omitRecursive(eventArgs, COMMON_FIELDS_TO_OMIT), null, 2)
-    );
-  }
+const PAYLOAD_REQUIRED_FIELDS = {
+  impid: 'string',
+  publisherId: 'string',
+}
 
-  let objType = null;
-  for (const type of Object.values(OBJECT_TYPES)) {
-    const identifyFields = OBJECT_TYPES_UNIQUE_FIELDS[type];
-    if (!identifyFields) {
+export const utils = {
+  /**
+   * Make a POST request to the given URL with the given data.
+   * @param {*} url
+   * @param {*} data JSON data
+   * @returns
+   */
+  postAjax: async function (url, data) {
+    return new Promise((resolve, reject) => {
+      try {
+        logInfo('postAjax:', url, data);
+        ajax(url, resolve, JSON.stringify(data), {
+          contentType: 'application/json',
+          method: 'POST',
+          withCredentials: false, // No user-specific data is tied to the request
+          referrerPolicy: 'unsafe-url',
+          crossOrigin: true
+        });
+      } catch (error) {
+        reject(new Error(
+          `Failed to make post request to endpoint "${url}". With data: ` +
+          JSON.stringify(utils.omitRecursive(data, COMMON_FIELDS_TO_OMIT), null, 2),
+          { error: error.message }
+        ));
+      }
+    });
+  },
+
+  /**
+   * Make a GET request to the given URL. If the request fails, it will fall back
+   * to AJAX request.
+   * @param {*} url URL with the query string
+   * @returns
+   */
+  sendGetRequest: async function(url) {
+    return new Promise((resolve, reject) => {
+      try {
+        logInfo('triggerPixel', url);
+        triggerPixel(url, resolve);
+      } catch (error) {
+        try {
+          logWarn(`triggerPixel failed. URL: (${url}) Falling back to ajax. Error: `, error);
+          ajax(url, resolve, null, {
+            contentType: 'application/json',
+            method: 'GET',
+            withCredentials: false, // No user-specific data is tied to the request
+            referrerPolicy: 'unsafe-url',
+            crossOrigin: true
+          });
+        } catch (error) {
+          // If failed with both methods, reject the promise
+          reject(error);
+        }
+      }
+    });
+  },
+
+  /**
+   * Check if the given Prebid bid is from Mobkoi.
+   * @param {*} prebidBid
+   * @returns
+   */
+  isMobkoiBid: function (prebidBid) {
+    return prebidBid && prebidBid.bidderCode === BIDDER_CODE;
+  },
+
+  /**
+   * The primary ID we use for identifying bid requests and responses.
+   * Get ORTB ID from Prebid Bid response or ORTB bid response object.
+   */
+  getOrtbId: function (bid) {
+    if (bid.id) {
+      if (debugTurnedOn()) {
+        try {
+          const objType = utils.determineObjType(bid);
+          if (!objType === utils.SUB_PAYLOAD_TYPES.ORTB_BID) {
+            logWarn(
+              `Given object is not an ORTB bid response. Given object type: ${objType}.`,
+              bid
+            );
+          }
+        } catch (error) {
+          logWarn('Error when determining object type. Given object:', bid);
+        }
+      }
+      // If it's an ORTB bid response
+      return bid.id;
+    } else if (bid.ortbId) {
+      // If it's a Prebid bid response
+      return bid.ortbId;
+    } else if (bid.ortbBidResponse && bid.ortbBidResponse.id) {
+      // If it's a Prebid bid response with ORTB response. i.e. interpreted response
+      return bid.ortbBidResponse.id;
+    } else {
+      throw new Error('Not a valid bid object. Given object:\n' +
+        JSON.stringify(utils.omitRecursive(bid, COMMON_FIELDS_TO_OMIT), null, 2));
+    }
+  },
+
+  /**
+   * Impression ID is named differently in different objects. This function will
+   * return the impression ID from the given bid object.
+   * @param {*} bid ORTB bid response or Prebid bid response or Prebid bid request
+   * @returns string | null
+   */
+  getImpId: function (bid) {
+    return (bid && (bid.impid || bid.requestId || bid.bidId)) || null;
+  },
+
+  logTrackEvent: function (eventType, eventArgs) {
+    if (!debugTurnedOn()) {
+      return;
+    }
+    const argsType = (() => {
+      try {
+        return utils.determineObjType(eventArgs);
+      } catch (error) {
+        logError(`Error when logging track event: [${eventType}]\n`, error);
+        return 'Unknown';
+      }
+    })();
+    logInfo(`Track event: [${eventType}]. Args Type Determination: ${argsType}`, eventArgs);
+  },
+
+  /**
+   * Determine the type of the given object based on the object's fields.
+   * This is useful for identifying the type of object that is passed in to the
+   * handler functions.
+   * @param {*} eventArgs
+   * @returns string
+   */
+  determineObjType: function (eventArgs) {
+    if (typeof eventArgs !== 'object' || eventArgs === null) {
       throw new Error(
-        `Identify fields for type "${type}" is not defined in COMMON_OBJECT_UNIT_FIELDS.`
+        'determineObjType: Expect an object. Given object is not an object or null. Given object:' +
+        JSON.stringify(utils.omitRecursive(eventArgs, COMMON_FIELDS_TO_OMIT), null, 2)
       );
     }
-    // If all fields are available in the object, then it's the type we are looking for
-    if (identifyFields.every(field => eventArgs.hasOwnProperty(field))) {
-      objType = type;
-      break;
-    }
-  }
 
-  if (!objType) {
-    throw new Error(
-      'Unable to determine track args type. Please update COMMON_OBJECT_UNIT_FIELDS for the new object type.\n' +
-      'Given object:\n' +
-      JSON.stringify(omitRecursive(eventArgs, COMMON_FIELDS_TO_OMIT), null, 2)
-    );
-  }
-
-  return objType;
-}
-
-/**
- * Merge the given object into the target object. This function will set
- * impression ID in the payload object to ensure each payload object has the
- * impression ID for identification.
- * @param {*} target Object that will be updated in-place
- * @param {*} newValues Object containing new values to be merged
- * @param {*} impid Impression ID to be set in the payload object. It is to
- * ensure each payload object has the impression ID for identification.
- */
-function mergePayloadAndSetImpid(target, newValues, impid) {
-  if (typeof target !== 'object') {
-    throw new Error('Target must be an object');
-  }
-
-  if (typeof newValues !== 'object') {
-    throw new Error('New values must be an object');
-  }
-
-  if (impid && typeof impid !== 'string') {
-    throw new Error('Impression ID must be a string');
-  }
-
-  // Ensure the impid is set in the payload object
-  _each(newValues, (value) => {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      if (!value.impid) {
-        value.impid = impid;
+    let objType = null;
+    for (const type of Object.values(SUB_PAYLOAD_TYPES)) {
+      const identifyFields = SUB_PAYLOAD_UNIQUE_FIELDS_LOOKUP[type];
+      if (!identifyFields) {
+        throw new Error(
+          `Identify fields for type "${type}" is not defined in COMMON_OBJECT_UNIT_FIELDS.`
+        );
+      }
+      // If all fields are available in the object, then it's the type we are looking for
+      if (identifyFields.every(field => eventArgs.hasOwnProperty(field))) {
+        objType = type;
+        break;
       }
     }
-  });
 
-  mergeDeep(target, newValues);
-}
+    if (!objType) {
+      throw new Error(
+        'Unable to determine track args type. Please update COMMON_OBJECT_UNIT_FIELDS for the new object type.\n' +
+        'Given object:\n' +
+        JSON.stringify(utils.omitRecursive(eventArgs, COMMON_FIELDS_TO_OMIT), null, 2)
+      );
+    }
 
-/**
- * Recursively omit the given keys from the object.
- * @param {*} obj - The object to process.
- * @param {Array} keysToOmit - The keys to omit from the object.
- * @param {*} [placeholder='OMITTED'] - The placeholder value to use for omitted keys.
- * @returns {Object} - A clone of the given object with the specified keys omitted.
- */
-function omitRecursive(obj, keysToOmit, placeholder = 'OMITTED') {
-  return Object.keys(obj).reduce((acc, currentKey) => {
-    // If the current key is in the keys to omit, replace the value with the placeholder
-    if (keysToOmit.includes(currentKey)) {
-      acc[currentKey] = placeholder;
+    return objType;
+  },
+
+  /**
+   * Merge a Payload object with new values. The payload object must be in
+   * specific format where root level keys are SUB_PAYLOAD_TYPES values and the
+   * property values must be an object of the given type.
+   * @param {*} targetPayload
+   * @param {*} newSubPayloads
+   * @param {*} customFields Custom fields that are required for the sub payloads.
+   */
+  mergePayloadAndAddCustomFields: function (targetPayload, newSubPayloads, customFields = undefined) {
+    if (typeof targetPayload !== 'object') {
+      throw new Error('Target must be an object');
+    }
+
+    if (typeof newSubPayloads !== 'object') {
+      throw new Error('New values must be an object');
+    }
+
+    // Ensure all the required custom fields are available
+    if (customFields) {
+      _each(customFields, (fieldType, fieldName) => {
+        if (fieldType === 'string' && typeof newSubPayloads[fieldName] !== 'string') {
+          throw new Error(
+            `Field "${fieldName}" must be a string. Given: ${newSubPayloads[fieldName]}`
+          );
+        }
+      });
+    }
+
+    mergeDeep(targetPayload, newSubPayloads);
+
+    // Add the custom fields to the sub-payloads just added to the target payload
+    if (customFields) {
+      utils.addCustomFieldsToSubPayloads(targetPayload, customFields);
+    }
+  },
+
+  /**
+   * Should not use this function directly. Use mergePayloadAndCustomFields
+   * instead. This function add custom fields to the sub-payloads. The provided
+   * custom fields will be validated.
+   * @param {*} subPayloads A group of payloads that are useful for debugging. Indexed by SUB_PAYLOAD_TYPES.
+   * @param {*} customFields Custom fields that are required for the sub
+   * payloads. Fields are defined in PAYLOAD_REQUIRED_FIELDS.
+   */
+  addCustomFieldsToSubPayloads: function (subPayloads, customFields) {
+    _each(subPayloads, (currentSubPayload, subPayloadType) => {
+      if (!Object.values(SUB_PAYLOAD_TYPES).includes(subPayloadType)) {
+        return;
+      }
+
+      // Add the custom fields to the sub-payloads
+      mergeDeep(currentSubPayload, customFields);
+    });
+
+    // Before leaving the function, validate the payload to ensure all
+    // required fields are available.
+    utils.validateSubPayloads(subPayloads);
+  },
+
+  /**
+   * Recursively omit the given keys from the object.
+   * @param {*} obj - The object to process.
+   * @throws {Error} - If the given object is not valid.
+   */
+  validateSubPayloads: function (subPayloads) {
+    _each(subPayloads, (currentSubPayload, subPayloadType) => {
+      if (!Object.values(SUB_PAYLOAD_TYPES).includes(subPayloadType)) {
+        return;
+      }
+
+      const validationErrors = [];
+      // Validate the required fields
+      _each(PAYLOAD_REQUIRED_FIELDS, (requiredFieldType, requiredFieldName) => {
+        // eslint-disable-next-line valid-typeof
+        if (typeof currentSubPayload[requiredFieldName] !== requiredFieldType) {
+          validationErrors.push(new Error(
+            `Field "${requiredFieldName}" in "${subPayloadType}" must be a ${requiredFieldType}. Given: ${currentSubPayload[requiredFieldName]}`
+          ));
+        }
+      });
+
+      if (validationErrors.length > 0) {
+        throw new Error(
+          `Validation failed for "${subPayloadType}".\n` +
+          `Object: ${JSON.stringify(utils.omitRecursive(currentSubPayload, COMMON_FIELDS_TO_OMIT), null, 2)}\n` +
+          validationErrors.map(error => `Error: ${error.message}`).join('\n')
+        );
+      }
+    });
+  },
+
+  /**
+   * Recursively omit the given keys from the object.
+   * @param {*} obj - The object to process.
+   * @param {Array} keysToOmit - The keys to omit from the object.
+   * @param {*} [placeholder='OMITTED'] - The placeholder value to use for omitted keys.
+   * @returns {Object} - A clone of the given object with the specified keys omitted.
+   */
+  omitRecursive: function (obj, keysToOmit, placeholder = 'OMITTED') {
+    return Object.keys(obj).reduce((acc, currentKey) => {
+      // If the current key is in the keys to omit, replace the value with the placeholder
+      if (keysToOmit.includes(currentKey)) {
+        acc[currentKey] = placeholder;
+        return acc;
+      }
+
+      // If the current value is an object and not null, recursively omit keys
+      if (typeof obj[currentKey] === 'object' && obj[currentKey] !== null) {
+        acc[currentKey] = utils.omitRecursive(obj[currentKey], keysToOmit, placeholder);
+      } else {
+        // Otherwise, directly assign the value to the accumulator object
+        acc[currentKey] = obj[currentKey];
+      }
       return acc;
-    }
-
-    // If the current value is an object and not null, recursively omit keys
-    if (typeof obj[currentKey] === 'object' && obj[currentKey] !== null) {
-      acc[currentKey] = omitRecursive(obj[currentKey], keysToOmit, placeholder);
-    } else {
-      // Otherwise, directly assign the value to the accumulator object
-      acc[currentKey] = obj[currentKey];
-    }
-    return acc;
-  }, {});
-}
+    }, {});
+  }
+};
