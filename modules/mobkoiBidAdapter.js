@@ -1,7 +1,7 @@
 import { ortbConverter } from '../libraries/ortbConverter/converter.js';
 import { registerBidder } from '../src/adapters/bidderFactory.js';
 import { BANNER } from '../src/mediaTypes.js';
-import { _each, replaceMacros, deepAccess, deepSetValue } from '../src/utils.js';
+import { _each, replaceMacros, deepAccess, deepSetValue, logError } from '../src/utils.js';
 
 const BIDDER_CODE = 'mobkoi';
 /**
@@ -39,6 +39,13 @@ export const spec = {
   supportedMediaTypes: [BANNER],
 
   isBidRequestValid(bid) {
+    if (!deepAccess(bid, 'ortb2.site.publisher.id')) {
+      logError('The "ortb2.site.publisher.id" field is required in the bid request.' + 
+        'Please set it via the "config.ortb2.site.publisher.id" field with pbjs.setBidderConfig.'
+      );
+      return false;
+    }
+
     return true;
   },
 
@@ -50,10 +57,7 @@ export const spec = {
         options: {
           contentType: 'application/json',
         },
-        data: {
-          ortb: converter.toORTB({ bidRequests: [currentPrebidBidRequest], bidderRequest: prebidBidderRequest }),
-          publisherBidParams: currentPrebidBidRequest.params,
-        },
+        data: converter.toORTB({ bidRequests: [currentPrebidBidRequest], bidderRequest: prebidBidderRequest }),
       };
     });
   },
@@ -63,7 +67,7 @@ export const spec = {
 
     const responseBody = {...serverResponse.body, seatbid: serverResponse.body.seatbid};
     const prebidBidResponse = converter.fromORTB({
-      request: customBidRequest.data.ortb,
+      request: customBidRequest.data,
       response: responseBody,
     });
 
@@ -86,6 +90,7 @@ function replaceAllMacrosInPlace(ortbBidResponse, context) {
     CREATIVE_ID: ortbBidResponse.crid,
     CAMPAIGN_ID: ortbBidResponse.cid,
     ORTB_ID: ortbBidResponse.id,
+    PUBLISHER_ID: deepAccess(context, 'bidRequest.ortb2.site.publisher.id'),
   };
 
   _each(ORTB_RESPONSE_FIELDS_SUPPORT_MACROS, ortbField => {

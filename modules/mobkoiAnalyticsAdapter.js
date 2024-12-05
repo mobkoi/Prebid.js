@@ -12,9 +12,9 @@ import {
   debugTurnedOn,
   mergeDeep,
   isEmpty,
-  deepClone
+  deepClone,
+  deepAccess,
 } from '../src/utils.js';
-import { valid } from 'node-html-parser';
 
 const BIDDER_CODE = 'mobkoi';
 const analyticsType = 'endpoint';
@@ -109,7 +109,7 @@ class LocalContext {
         // Add the identity fields to all sub payloads
         {
           impid: currentImpid,
-          publisherId: initOptions.publisherId,
+          publisherId: utils.getPublisherId(this.bidderRequests[0]),
         }
       );
     });
@@ -232,12 +232,14 @@ class LocalContext {
    * debugging. Payload cross events will merge into one object.
    */
   pushEventToAllBidContexts({eventType, level, timestamp, note, subPayloads}) {
+    const publisherId = utils.getPublisherId(this.bidderRequests[0]);
+
     // Create one event for each impression ID
     _each(this.getAllBidderRequestImpIds(), impid => {
       const eventClone = new Event({
         eventType,
         impid,
-        publisherId: initOptions.publisherId,
+        publisherId,
         level,
         timestamp,
         note,
@@ -259,7 +261,7 @@ class LocalContext {
         eventInstance: new Event({
           eventType,
           impid: bidContext.impid,
-          publisherId: initOptions.publisherId,
+          publisherId: utils.getPublisherId(this.bidderRequests[0]),
           level,
           timestamp,
           note,
@@ -475,7 +477,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
-              publisherId: initOptions.publisherId,
+              publisherId: utils.getPublisherId(prebidBid),
               level: DEBUG_EVENT_LEVELS.info,
               timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
@@ -501,7 +503,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
               eventInstance: new Event({
                 eventType: currentBidContext.bidWin ? eventType : CUSTOM_EVENTS.BID_LOSS,
                 impid: currentBidContext.impid,
-                publisherId: initOptions.publisherId,
+                publisherId: utils.getPublisherId(prebidBid),
                 level: DEBUG_EVENT_LEVELS.info,
                 timestamp: prebidEventArgs.timestamp || Date.now(),
               }),
@@ -547,7 +549,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
-              publisherId: initOptions.publisherId,
+              publisherId: utils.getPublisherId(prebidBid),
               level: DEBUG_EVENT_LEVELS.error,
               timestamp: prebidEventArgs.timestamp || Date.now(),
               note: prebidEventArgs.rejectionReason,
@@ -580,7 +582,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
-              publisherId: initOptions.publisherId,
+              publisherId: utils.getPublisherId(prebidBid),
               level: DEBUG_EVENT_LEVELS.error,
               timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
@@ -599,7 +601,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
-              publisherId: initOptions.publisherId,
+              publisherId: utils.getPublisherId(prebidBid),
               level: DEBUG_EVENT_LEVELS.info,
               timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
@@ -671,10 +673,6 @@ mobkoiAnalytics.originEnableAnalytics = mobkoiAnalytics.enableAnalytics;
 // override enableAnalytics so we can get access to the config passed in from the page
 mobkoiAnalytics.enableAnalytics = function (config) {
   initOptions = config.options;
-  if (!config.options.publisherId) {
-    logError('PublisherId option is not defined. Analytics won\'t work');
-    return;
-  }
 
   if (!config.options.endpoint) {
     logError('Endpoint option is not defined. Analytics won\'t work');
@@ -731,6 +729,14 @@ class BidContext {
     }
   };
 
+  get publisherId() {
+    if (this.prebidBidRequest) {
+      return utils.getPublisherId(this.prebidBidRequest);
+    } else {
+      throw new Error('ORTB bid response and Prebid bid response are not available for extracting Publisher ID');
+    }
+  }
+
   /**
    * The prebid bid request object before converted to ORTB request in our
    * custom adapter.
@@ -769,7 +775,7 @@ class BidContext {
       // Add the identity fields to all sub payloads
       {
         impid: this.impid,
-        publisherId: initOptions.publisherId,
+        publisherId: this.publisherId,
       }
     );
   }
@@ -1085,6 +1091,20 @@ export const utils = {
    */
   getImpId: function (bid) {
     return (bid && (bid.impid || bid.requestId || bid.bidId)) || null;
+  },
+
+  getPublisherId: function (prebidBidOrOrtbBid) {
+    const publisherId = deepAccess(prebidBidOrOrtbBid, 'ortb2.site.publisher.id') ||
+                      deepAccess(prebidBidOrOrtbBid, 'site.publisher.id');
+
+    if (!publisherId) {
+      throw new Error(
+        'Failed to obtain publisher ID from the given object. Given object:\n' +
+        JSON.stringify(prebidBidOrOrtbBid, null, 2)
+      );
+    }
+
+    return publisherId;
   },
 
   logTrackEvent: function (eventType, eventArgs) {
