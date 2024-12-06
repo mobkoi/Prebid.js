@@ -1056,36 +1056,35 @@ export const utils = {
   },
 
   /**
-   * The primary ID we use for identifying bid requests and responses.
-   * Get ORTB ID from Prebid Bid response or ORTB bid response object.
+   * We use the bidderRequestId as the ortbId. We could do so because we only
+   * make one ORTB request per Prebid Bidder Request.
+   * The ID field named differently when the value passed on to different contexts.
+   * Make sure the implementation of this function matches utils.getOrtbId in
+   * mobkoiAnalyticsAdapter.js.
+   * @param {*} bid Prebid Bidder Request Object or Prebid Bid Response/Request
+   * or ORTB Request/Response Object
+   * @returns {string} The ORTB ID
+   * @throws {Error} If the ORTB ID cannot be found in the given object.
    */
-  getOrtbId: function (bid) {
-    if (bid.id) {
-      if (debugTurnedOn()) {
-        try {
-          const objType = utils.determineObjType(bid);
-          if (!objType === utils.SUB_PAYLOAD_TYPES.ORTB_BID) {
-            logWarn(
-              `Given object is not an ORTB bid response. Given object type: ${objType}.`,
-              bid
-            );
-          }
-        } catch (error) {
-          logWarn('Error when determining object type. Given object:', bid);
-        }
-      }
-      // If it's an ORTB bid response
-      return bid.id;
-    } else if (bid.ortbId) {
-      // If it's a Prebid bid response
-      return bid.ortbId;
-    } else if (bid.ortbBidResponse && bid.ortbBidResponse.id) {
-      // If it's a Prebid bid response with ORTB response. i.e. interpreted response
-      return bid.ortbBidResponse.id;
-    } else {
-      throw new Error('Not a valid bid object. Given object:\n' +
-        JSON.stringify(utils.omitRecursive(bid, COMMON_FIELDS_TO_OMIT), null, 2));
+  getOrtbId(bid) {
+    const ortbId =
+      // called bidderRequestId in Prebid Request
+      bid.bidderRequestId ||
+      // called seatBidId in Prebid Bid Response Object
+      bid.seatBidId ||
+      // called ortbId in Interpreted Prebid Response Object
+      bid.ortbId ||
+      // called id in ORTB object
+      (Object.hasOwn(bid, 'imp') && bid.id);
+
+    if (!ortbId) {
+      throw new Error(
+        'Failed to obtain ORTB ID from the given object. Given object:\n' +
+        JSON.stringify(utils.omitRecursive(bid, COMMON_FIELDS_TO_OMIT), null, 2)
+      );
     }
+
+    return ortbId;
   },
 
   /**
