@@ -109,7 +109,7 @@ class LocalContext {
         // Add the identity fields to all sub payloads
         {
           impid: currentImpid,
-          publisherId: utils.getPublisherId(this.bidderRequests[0]),
+          publisherId: this.publisherId,
         }
       );
     });
@@ -125,6 +125,13 @@ class LocalContext {
    * Auction.bidderRequests object
    */
   bidderRequests = null;
+
+  get publisherId() {
+    if (!this.bidderRequests) {
+      throw new Error('Bidder requests are not available. Accessing before assigning.');
+    }
+    return utils.getPublisherId(this.bidderRequests[0]);
+  }
 
   /**
    * Extract all impression IDs from all bid requests.
@@ -232,14 +239,12 @@ class LocalContext {
    * debugging. Payload cross events will merge into one object.
    */
   pushEventToAllBidContexts({eventType, level, timestamp, note, subPayloads}) {
-    const publisherId = utils.getPublisherId(this.bidderRequests[0]);
-
     // Create one event for each impression ID
     _each(this.getAllBidderRequestImpIds(), impid => {
       const eventClone = new Event({
         eventType,
         impid,
-        publisherId,
+        publisherId: this.publisherId,
         level,
         timestamp,
         note,
@@ -261,7 +266,7 @@ class LocalContext {
         eventInstance: new Event({
           eventType,
           impid: bidContext.impid,
-          publisherId: utils.getPublisherId(this.bidderRequests[0]),
+          publisherId: this.publisherId,
           level,
           timestamp,
           note,
@@ -477,7 +482,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
-              publisherId: utils.getPublisherId(prebidBid),
+              publisherId: this.localContext.publisherId,
               level: DEBUG_EVENT_LEVELS.info,
               timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
@@ -503,7 +508,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
               eventInstance: new Event({
                 eventType: currentBidContext.bidWin ? eventType : CUSTOM_EVENTS.BID_LOSS,
                 impid: currentBidContext.impid,
-                publisherId: utils.getPublisherId(prebidBid),
+                publisherId: this.localContext.publisherId,
                 level: DEBUG_EVENT_LEVELS.info,
                 timestamp: prebidEventArgs.timestamp || Date.now(),
               }),
@@ -549,7 +554,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
-              publisherId: utils.getPublisherId(prebidBid),
+              publisherId: this.localContext.publisherId,
               level: DEBUG_EVENT_LEVELS.error,
               timestamp: prebidEventArgs.timestamp || Date.now(),
               note: prebidEventArgs.rejectionReason,
@@ -582,7 +587,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
-              publisherId: utils.getPublisherId(prebidBid),
+              publisherId: this.localContext.publisherId,
               level: DEBUG_EVENT_LEVELS.error,
               timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
@@ -601,7 +606,7 @@ let mobkoiAnalytics = Object.assign(adapter({analyticsType}), {
             eventInstance: new Event({
               eventType,
               impid: bidContext.impid,
-              publisherId: utils.getPublisherId(prebidBid),
+              publisherId: this.localContext.publisherId,
               level: DEBUG_EVENT_LEVELS.info,
               timestamp: prebidEventArgs.timestamp || Date.now(),
             }),
@@ -1093,14 +1098,20 @@ export const utils = {
     return (bid && (bid.impid || bid.requestId || bid.bidId)) || null;
   },
 
-  getPublisherId: function (prebidBidOrOrtbBid) {
-    const publisherId = deepAccess(prebidBidOrOrtbBid, 'ortb2.site.publisher.id') ||
-                      deepAccess(prebidBidOrOrtbBid, 'site.publisher.id');
+  /**
+   * Extract the publisher ID from the given object.
+   * @param {*} prebidBidRequestOrOrtbBidRequest
+   * @returns string
+   * @throws {Error} If the publisher ID is not found in the given object.
+   */
+  getPublisherId: function (prebidBidRequestOrOrtbBidRequest) {
+    const publisherId = deepAccess(prebidBidRequestOrOrtbBidRequest, 'ortb2.site.publisher.id') ||
+                      deepAccess(prebidBidRequestOrOrtbBidRequest, 'site.publisher.id');
 
     if (!publisherId) {
       throw new Error(
         'Failed to obtain publisher ID from the given object. Given object:\n' +
-        JSON.stringify(prebidBidOrOrtbBid, null, 2)
+        JSON.stringify(prebidBidRequestOrOrtbBidRequest, null, 2)
       );
     }
 
