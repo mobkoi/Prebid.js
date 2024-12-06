@@ -19,6 +19,11 @@ import {
 const BIDDER_CODE = 'mobkoi';
 const analyticsType = 'endpoint';
 const GVL_ID = 898;
+/**
+ * !IMPORTANT: Must match the value in the mobkoiBidAdapter.js
+ * The name of the parameter that the publisher can use to specify the ad server endpoint.
+ */
+const PARAM_NAME_AD_SERVER_BASE_URL = 'adServerBaseUrl';
 
 /**
  * Order by events lifecycle
@@ -43,11 +48,6 @@ const {
 const CUSTOM_EVENTS = {
   BID_LOSS: 'bidLoss',
 };
-
-/**
- * The options that are passed in from the page
- */
-let initOptions = {};
 
 const DEBUG_EVENT_LEVELS = {
   info: 'info',
@@ -131,6 +131,19 @@ class LocalContext {
       throw new Error('Bidder requests are not available. Accessing before assigning.');
     }
     return utils.getPublisherId(this.bidderRequests[0]);
+  }
+
+  get adServerBaseUrl() {
+    if (
+      !Array.isArray(this.bidderRequests) &&
+      this.bidderRequests.length > 0
+    ) {
+      throw new Error('Bidder requests are not available. Accessing before assigning.' +
+        JSON.stringify(this.bidderRequests, null, 2)
+      );
+    }
+
+    return utils.getAdServerEndpointBaseUrl(this.bidderRequests[0]);
   }
 
   /**
@@ -293,6 +306,7 @@ class LocalContext {
     }
 
     const flushPromises = [];
+    const debugEndpoint = `${this.adServerBaseUrl}/debug`;
 
     // If there are no bid contexts, and there are error events, submit the
     // common events to the server
@@ -321,7 +335,7 @@ class LocalContext {
 
       _each(debugReports, debugReport => {
         flushPromises.push(utils.postAjax(
-          `${initOptions.endpoint}/debug`,
+          debugEndpoint,
           debugReport
         ));
       });
@@ -334,7 +348,7 @@ class LocalContext {
         .map(async (currentBidContext) => {
           logInfo('Flush bid context events to the server', currentBidContext);
           return utils.postAjax(
-            `${initOptions.endpoint}/debug`,
+            debugEndpoint,
             {
               impid: currentBidContext.impid,
               bidWin: currentBidContext.bidWin,
@@ -677,14 +691,6 @@ mobkoiAnalytics.originEnableAnalytics = mobkoiAnalytics.enableAnalytics;
 
 // override enableAnalytics so we can get access to the config passed in from the page
 mobkoiAnalytics.enableAnalytics = function (config) {
-  initOptions = config.options;
-
-  if (!config.options.endpoint) {
-    logError('Endpoint option is not defined. Analytics won\'t work');
-    return;
-  }
-
-  logInfo('mobkoiAnalytics.enableAnalytics', initOptions);
   mobkoiAnalytics.originEnableAnalytics(config); // call the base class function
 };
 
@@ -1056,11 +1062,11 @@ export const utils = {
   },
 
   /**
+   * !IMPORTANT: Make sure the implementation of this function matches utils.getOrtbId in
+   * mobkoiAnalyticsAdapter.js.
    * We use the bidderRequestId as the ortbId. We could do so because we only
    * make one ORTB request per Prebid Bidder Request.
    * The ID field named differently when the value passed on to different contexts.
-   * Make sure the implementation of this function matches utils.getOrtbId in
-   * mobkoiAnalyticsAdapter.js.
    * @param {*} bid Prebid Bidder Request Object or Prebid Bid Response/Request
    * or ORTB Request/Response Object
    * @returns {string} The ORTB ID
@@ -1098,23 +1104,62 @@ export const utils = {
   },
 
   /**
+   * !IMPORTANT: Make sure the implementation of this function matches utils.getPublisherId in
+   * both adapters.
    * Extract the publisher ID from the given object.
-   * @param {*} prebidBidRequestOrOrtbBidRequest
+   * @param {*} bid Prebid Bidder Request Object or Prebid Bid Response/Request
+   * or ORTB Request/Response Object
    * @returns string
    * @throws {Error} If the publisher ID is not found in the given object.
    */
-  getPublisherId: function (prebidBidRequestOrOrtbBidRequest) {
-    const publisherId = deepAccess(prebidBidRequestOrOrtbBidRequest, 'ortb2.site.publisher.id') ||
-                      deepAccess(prebidBidRequestOrOrtbBidRequest, 'site.publisher.id');
+  getPublisherId: function (bid) {
+    const ortbPath = 'site.publisher.id';
+    const prebidPath = `ortb2.${ortbPath}`;
+
+    const publisherId =
+      deepAccess(bid, prebidPath) ||
+      deepAccess(bid, ortbPath);
 
     if (!publisherId) {
       throw new Error(
-        'Failed to obtain publisher ID from the given object. Given object:\n' +
-        JSON.stringify(prebidBidRequestOrOrtbBidRequest, null, 2)
+        'Failed to obtain publisher ID from the given object. ' +
+        `Please set it via the "${prebidPath}" field with pbjs.setBidderConfig.\n` +
+        'Given object:\n' +
+        JSON.stringify(bid, null, 2)
       );
     }
 
     return publisherId;
+  },
+
+  /**
+   * !IMPORTANT: Make sure the implementation of this function matches getAdServerEndpointBaseUrl
+   * in both adapters.
+   * Obtain the Ad Server Base URL from the given Prebid object.
+   * @param {*} bid Prebid Bidder Request Object or Prebid Bid Response/Request
+   * or ORTB Request/Response Object
+   * @returns {string} The Ad Server Base URL
+   * @throws {Error} If the ORTB ID cannot be found in the given
+   */
+  getAdServerEndpointBaseUrl (bid) {
+    const path = `site.publisher.ext.${PARAM_NAME_AD_SERVER_BASE_URL}`;
+    const preBidPath = `ortb2.${path}`;
+
+    const adServerBaseUrl =
+      // For Prebid Bid objects
+      deepAccess(bid, preBidPath) ||
+      // For ORTB objects
+      deepAccess(bid, path);
+
+    if (!adServerBaseUrl) {
+      throw new Error('Failed to find the Ad Server Base URL in the given object. ' +
+        `Please set it via the "${preBidPath}" field with pbjs.setBidderConfig.\n` +
+        'Given Object:\n' +
+        JSON.stringify(bid, null, 2)
+      );
+    }
+
+    return adServerBaseUrl;
   },
 
   logTrackEvent: function (eventType, eventArgs) {

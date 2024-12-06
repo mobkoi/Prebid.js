@@ -5,6 +5,7 @@ import { _each, replaceMacros, deepAccess, deepSetValue, logError } from '../src
 
 const BIDDER_CODE = 'mobkoi';
 /**
+ * !IMPORTANT: This value must match the value in mobkoiAnalyticsAdapter.js
  * The name of the parameter that the publisher can use to specify the ad server endpoint.
  */
 const PARAM_NAME_AD_SERVER_BASE_URL = 'adServerBaseUrl';
@@ -28,10 +29,6 @@ export const converter = ortbConverter({
     ortbRequest.id = utils.getOrtbId(prebidBidRequest);
 
     return ortbRequest;
-  },
-  imp(buildImp, bidRequest, context) {
-    context[PARAM_NAME_AD_SERVER_BASE_URL] = utils.getBidServerEndpointBase(bidRequest);
-    return buildImp(bidRequest, context);
   },
   bidResponse(buildPrebidBidResponse, ortbBidResponse, context) {
     utils.replaceAllMacrosInPlace(ortbBidResponse, context);
@@ -58,9 +55,11 @@ export const spec = {
   },
 
   buildRequests(prebidBidRequests, prebidBidderRequest) {
+    const adServerEndpoint = utils.getAdServerEndpointBaseUrl(prebidBidderRequest) + '/bid';
+
     return {
       method: 'POST',
-      url: utils.getBidServerEndpointBase(prebidBidRequests[0]) + '/bid',
+      url: adServerEndpoint,
       options: {
         contentType: 'application/json',
       },
@@ -87,57 +86,69 @@ export const spec = {
 registerBidder(spec);
 
 const utils = {
-  replaceAllMacrosInPlace(ortbBidResponse, context) {
-    const macros = {
-      // ORTB macros
-      AUCTION_PRICE: ortbBidResponse.price,
-      AUCTION_IMP_ID: ortbBidResponse.impid,
-      AUCTION_CURRENCY: ortbBidResponse.cur,
-      AUCTION_BID_ID: context.bidderRequest.auctionId,
 
-      // Custom macros
-      BIDDING_API_BASE_URL: context[PARAM_NAME_AD_SERVER_BASE_URL],
-      CREATIVE_ID: ortbBidResponse.crid,
-      CAMPAIGN_ID: ortbBidResponse.cid,
-      ORTB_ID: ortbBidResponse.id,
-      PUBLISHER_ID: deepAccess(context, 'bidRequest.ortb2.site.publisher.id'),
-    };
+  /**
+   * !IMPORTANT: Make sure the implementation of this function matches getAdServerEndpointBaseUrl
+   * in both adapters.
+   * Obtain the Ad Server Base URL from the given Prebid object.
+   * @param {*} bid Prebid Bidder Request Object or Prebid Bid Response/Request
+   * or ORTB Request/Response Object
+   * @returns {string} The Ad Server Base URL
+   * @throws {Error} If the ORTB ID cannot be found in the given
+   */
+  getAdServerEndpointBaseUrl (bid) {
+    const ortbPath = `site.publisher.ext.${PARAM_NAME_AD_SERVER_BASE_URL}`;
+    const prebidPath = `ortb2.${ortbPath}`;
 
-    _each(ORTB_RESPONSE_FIELDS_SUPPORT_MACROS, ortbField => {
-      deepSetValue(
-        ortbBidResponse,
-        ortbField,
-        replaceMacros(deepAccess(ortbBidResponse, ortbField), macros)
-      );
-    });
-  },
-
-  getBidServerEndpointBase (prebidBidRequest) {
-    const adServerBaseUrl = prebidBidRequest.params[PARAM_NAME_AD_SERVER_BASE_URL];
+    const adServerBaseUrl =
+      deepAccess(bid, prebidPath) ||
+      deepAccess(bid, ortbPath);
 
     if (!adServerBaseUrl) {
-      throw new Error(`The "${PARAM_NAME_AD_SERVER_BASE_URL}" parameter is required in Ad unit bid params.`);
+      throw new Error('Failed to find the Ad Server Base URL in the given object. ' +
+        `Please set it via the "${prebidPath}" field with pbjs.setBidderConfig.\n` +
+        'Given Object:\n' +
+        JSON.stringify(bid, null, 2)
+      );
     }
+
     return adServerBaseUrl;
   },
 
   /**
-   * Append custom fields to the prebid bid response. so that they can be accessed
-   * in various event handlers.
-   * @param {*} prebidBidResponse
-   * @param {*} ortbBidResponse
+   * !IMPORTANT: Make sure the implementation of this function matches utils.getPublisherId in
+   * both adapters.
+   * Extract the publisher ID from the given object.
+   * @param {*} prebidBidRequestOrOrtbBidRequest
+   * @returns string
+   * @throws {Error} If the publisher ID is not found in the given object.
    */
-  addCustomFieldsToPrebidBidResponse(prebidBidResponse, ortbBidResponse) {
-    prebidBidResponse.ortbBidResponse = ortbBidResponse;
-    prebidBidResponse.ortbId = ortbBidResponse.id;
+  getPublisherId: function (prebidBidRequestOrOrtbBidRequest) {
+    const ortbPath = 'site.publisher.id';
+    const prebidPath = `ortb2.${ortbPath}`;
+
+    const publisherId =
+      deepAccess(prebidBidRequestOrOrtbBidRequest, prebidPath) ||
+      deepAccess(prebidBidRequestOrOrtbBidRequest, ortbPath);
+
+    if (!publisherId) {
+      throw new Error(
+        'Failed to obtain publisher ID from the given object. ' +
+        `Please set it via the "${prebidPath}" field with pbjs.setBidderConfig.\n` +
+        'Given object:\n' +
+        JSON.stringify(prebidBidRequestOrOrtbBidRequest, null, 2)
+      );
+    }
+
+    return publisherId;
   },
 
   /**
+   * !IMPORTANT: Make sure the implementation of this function matches utils.getOrtbId in
+   * mobkoiAnalyticsAdapter.js.
    * We use the bidderRequestId as the ortbId. We could do so because we only
    * make one ORTB request per Prebid Bidder Request.
    * The ID field named differently when the value passed on to different contexts.
-   * Make sure the implementation of this function matches utils.getOrtbId in
-   * mobkoiAnalyticsAdapter.js.
    * @param {*} bid Prebid Bidder Request Object or Prebid Bid Response/Request
    * or ORTB Request/Response Object
    * @returns {string} The ORTB ID
@@ -161,5 +172,41 @@ const utils = {
     }
 
     return ortbId;
-  }
+  },
+
+  /**
+   * Append custom fields to the prebid bid response. so that they can be accessed
+   * in various event handlers.
+   * @param {*} prebidBidResponse
+   * @param {*} ortbBidResponse
+   */
+  addCustomFieldsToPrebidBidResponse(prebidBidResponse, ortbBidResponse) {
+    prebidBidResponse.ortbBidResponse = ortbBidResponse;
+    prebidBidResponse.ortbId = ortbBidResponse.id;
+  },
+
+  replaceAllMacrosInPlace(ortbBidResponse, context) {
+    const macros = {
+      // ORTB macros
+      AUCTION_PRICE: ortbBidResponse.price,
+      AUCTION_IMP_ID: ortbBidResponse.impid,
+      AUCTION_CURRENCY: ortbBidResponse.cur,
+      AUCTION_BID_ID: context.bidderRequest.auctionId,
+
+      // Custom macros
+      BIDDING_API_BASE_URL: utils.getAdServerEndpointBaseUrl(context.bidderRequest),
+      CREATIVE_ID: ortbBidResponse.crid,
+      CAMPAIGN_ID: ortbBidResponse.cid,
+      ORTB_ID: ortbBidResponse.id,
+      PUBLISHER_ID: deepAccess(context, 'bidRequest.ortb2.site.publisher.id'),
+    };
+
+    _each(ORTB_RESPONSE_FIELDS_SUPPORT_MACROS, ortbField => {
+      deepSetValue(
+        ortbBidResponse,
+        ortbField,
+        replaceMacros(deepAccess(ortbBidResponse, ortbField), macros)
+      );
+    });
+  },
 }
