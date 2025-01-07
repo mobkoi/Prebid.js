@@ -78,14 +78,13 @@ export const spec = {
       request: customBidRequest.data,
       response: responseBody,
     });
-
     return prebidBidResponse.bids;
   },
 };
 
 registerBidder(spec);
 
-const utils = {
+export const utils = {
 
   /**
    * !IMPORTANT: Make sure the implementation of this function matches getAdServerEndpointBaseUrl
@@ -198,7 +197,7 @@ const utils = {
       CREATIVE_ID: ortbBidResponse.crid,
       CAMPAIGN_ID: ortbBidResponse.cid,
       ORTB_ID: ortbBidResponse.id,
-      PUBLISHER_ID: deepAccess(context, 'bidRequest.ortb2.site.publisher.id'),
+      PUBLISHER_ID: deepAccess(context, 'bidRequest.ortb2.site.publisher.id') || deepAccess(context, 'bidderRequest.ortb2.site.publisher.id')
     };
 
     _each(ORTB_RESPONSE_FIELDS_SUPPORT_MACROS, ortbField => {
