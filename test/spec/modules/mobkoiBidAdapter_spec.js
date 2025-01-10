@@ -2,55 +2,48 @@ import {spec, utils} from 'modules/mobkoiBidAdapter.js';
 
 describe('Mobkoi bidding Adapter', function () {
   const adServerBaseUrl = 'http://adServerBaseUrl';
+  const requestId = 'test-request-id'
+  const publisherId = 'mobkoiPublisherId'
+  const bidId = 'test-bid-id'
+  const bidderCode = 'mobkoi'
+  const transactionId = 'test-transaction-id'
+  const adUnitId = 'test-ad-unit-id'
+  const auctionId = 'test-auction-id'
 
-  const getBidderRequest = () => ({
-    bidderCode: 'mobkoi',
-    auctionId: '90acf3a8-7710-48f9-8009-f7a985d0e605',
-    bidderRequestId: '2bcbed44fb310c',
-    bids: [{
-      bidder: 'mobkoi',
-      adUnitCode: 'banner-ad',
-      transactionId: 'e4895800-1a69-472c-9e6d-277a1ae1a119',
-      adUnitId: '6d636e93-32ac-4dc6-8a07-fa4167660265',
-      bidId: '3973172c31de61',
-      bidderRequestId: '2bcbed44fb310c',
-      auctionId: '90acf3a8-7710-48f9-8009-f7a985d0e605',
-      ortb2: {
-        site: {
-          publisher: {
-            id: 'mobkoiPublisherId',
-            ext: {
-              adServerBaseUrl
-            }
-          },
-        }
+  const getOrtb2 = () => ({
+    site: {
+      publisher: {
+        id: publisherId,
+        ext: { adServerBaseUrl }
       }
-    }],
-    ortb2: {
-      site: {
-        publisher: {
-          id: 'mobkoiPublisherId',
-          ext: {
-            adServerBaseUrl
-          }
-        },
-      },
     }
   })
 
+  const getBidRequest = () => ({
+    bidder: bidderCode,
+    adUnitCode: 'banner-ad',
+    transactionId,
+    adUnitId,
+    bidId: bidId,
+    bidderRequestId: requestId,
+    auctionId,
+    ortb2: getOrtb2()
+  })
+
+  const getBidderRequest = () => ({
+    bidderCode,
+    auctionId,
+    bidderRequestId: requestId,
+    bids: [getBidRequest()],
+    ortb2: getOrtb2()
+  })
+
   const getConvertedBidRequest = () => ({
-    id: '2bcbed44fb310c',
+    id: requestId,
     imp: [{
-      id: '3973172c31de61',
+      id: bidId,
     }],
-    site: {
-      publisher: {
-        id: 'mobkoiPublisherId',
-        ext: {
-          adServerBaseUrl
-        }
-      },
-    },
+    ...getOrtb2(),
     test: 0
   })
 
@@ -60,15 +53,15 @@ describe('Mobkoi bidding Adapter', function () {
 
   const getBidderResponse = () => ({
     body: {
-      id: '2bcbed44fb310c',
+      id: bidId,
       cur: 'USD',
       seatbid: [
         {
           seat: 'mobkoi_debug',
           bid: [
             {
-              id: '2bcbed44fb310c',
-              impid: '3973172c31de61',
+              id: bidId,
+              impid: bidId,
               cid: 'campaign_1',
               crid: 'creative_1',
               price: 1,
@@ -168,11 +161,11 @@ describe('Mobkoi bidding Adapter', function () {
 
       expect(bid.ad).to.include(adm);
       expect(bid.requestId).to.equal(bidderResponse.body.seatbid[0].bid[0].impid);
-      expect(bid.cpm).to.equal(1);
-      expect(bid.width).to.equal(300);
-      expect(bid.height).to.equal(250);
+      expect(bid.cpm).to.equal(bidderResponse.body.seatbid[0].bid[0].price);
+      expect(bid.width).to.equal(bidderResponse.body.seatbid[0].bid[0].w);
+      expect(bid.height).to.equal(bidderResponse.body.seatbid[0].bid[0].h);
       expect(bid.creativeId).to.equal(bidderResponse.body.seatbid[0].bid[0].crid);
-      expect(bid.currency).to.equal('USD');
+      expect(bid.currency).to.equal(bidderResponse.body.cur);
       expect(bid.netRevenue).to.be.true;
       expect(bid.ttl).to.equal(30);
     });
@@ -257,9 +250,11 @@ describe('Mobkoi bidding Adapter', function () {
         const bid = bidderResponse.body.seatbid[0].bid[0];
         bid.nurl = '${BIDDING_API_BASE_URL}/win?price=${AUCTION_PRICE}&impressionId=${AUCTION_IMP_ID}&currency=${AUCTION_CURRENCY}&campaignId=${CAMPAIGN_ID}&creativeId=${CREATIVE_ID}&publisherId=${PUBLISHER_ID}&ortbId=${ORTB_ID}';
         bid.lurl = '${BIDDING_API_BASE_URL}/loss?price=${AUCTION_PRICE}&impressionId=${AUCTION_IMP_ID}&currency=${AUCTION_CURRENCY}&campaignId=${CAMPAIGN_ID}&creativeId=${CREATIVE_ID}&publisherId=${PUBLISHER_ID}&ortbId=${ORTB_ID}';
+        bid.adm = '<div>${AUCTION_PRICE}${AUCTION_CURRENCY}${AUCTION_IMP_ID}${AUCTION_BID_ID}${CAMPAIGN_ID}${CREATIVE_ID}${PUBLISHER_ID}${ORTB_ID}${BIDDING_API_BASE_URL}</div>';
 
         const BIDDING_API_BASE_URL = adServerBaseUrl;
         const AUCTION_CURRENCY = bidderResponse.body.cur;
+        const AUCTION_BID_ID = bidderRequest.auctionId;
         const AUCTION_PRICE = bid.price;
         const AUCTION_IMP_ID = bid.impid;
         const CREATIVE_ID = bid.crid;
@@ -273,7 +268,7 @@ describe('Mobkoi bidding Adapter', function () {
         }
         utils.replaceAllMacrosInPlace(bid, context);
 
-        expect(bid.adm).to.equal(adm);
+        expect(bid.adm).to.equal(`<div>${AUCTION_PRICE}${AUCTION_CURRENCY}${AUCTION_IMP_ID}${AUCTION_BID_ID}${CAMPAIGN_ID}${CREATIVE_ID}${PUBLISHER_ID}${ORTB_ID}${BIDDING_API_BASE_URL}</div>`);
         expect(bid.lurl).to.equal(
           `${BIDDING_API_BASE_URL}/loss?price=${AUCTION_PRICE}&impressionId=${AUCTION_IMP_ID}&currency=${AUCTION_CURRENCY}&campaignId=${CAMPAIGN_ID}&creativeId=${CREATIVE_ID}&publisherId=${PUBLISHER_ID}&ortbId=${ORTB_ID}`
         );

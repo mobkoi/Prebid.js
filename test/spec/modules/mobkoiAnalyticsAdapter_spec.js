@@ -1,10 +1,24 @@
-import mobkoiAnalyticsAdapter, { LocalContext, DEBUG_EVENT_LEVELS, utils, SUB_PAYLOAD_UNIQUE_FIELDS_LOOKUP, SUB_PAYLOAD_TYPES } from 'modules/mobkoiAnalyticsAdapter.js';
+import mobkoiAnalyticsAdapter, { DEBUG_EVENT_LEVELS, utils, SUB_PAYLOAD_UNIQUE_FIELDS_LOOKUP, SUB_PAYLOAD_TYPES } from 'modules/mobkoiAnalyticsAdapter.js';
+import {internal} from '../../../src/utils.js';
 import adapterManager from '../../../src/adapterManager.js';
 import * as events from 'src/events.js';
 import { EVENTS } from 'src/constants.js';
 import sinon from 'sinon';
 
 const defaultTimeout = 10000;
+const requestId = 'test-request-id'
+const publisherId = 'mobkoiPublisherId'
+const bidId = 'test-bid-id'
+const bidderCode = 'mobkoi'
+const transactionId = 'test-transaction-id'
+const impressionId = 'test-impression-id'
+const adUnitId = 'test-ad-unit-id'
+const auctionId = 'test-auction-id'
+const adServerBaseUrl = 'http://adServerBaseUrl';
+
+const adm = '<div>test ad</div>';
+const lurl = 'test.com/loss';
+const nurl = 'test.com/win';
 
 const performStandardAuction = (auctionEvents) => {
   auctionEvents.forEach(auctionEvent => {
@@ -12,22 +26,51 @@ const performStandardAuction = (auctionEvents) => {
   });
 }
 
-const getMockEvents = () => {
-  const ortb2 = {
-    site: {
-      publisher: {
-        id: 'mobkoiPublisherId',
-        ext: { adServerBaseUrl: 'http://test-endpoint' }
-      }
+const getOrtb2 = () => ({
+  site: {
+    publisher: {
+      id: publisherId,
+      ext: { adServerBaseUrl }
     }
   }
-  const requestId = '28df0355619026'
-  const transactionId = '3d43c05d-0970-4e62-b5b2-ef9afec2093e'
-  const auctionId = '688e03d7-2695-434c-b819-f8c43707b150';
+})
+
+const getBidderResponse = () => ({
+  body: {
+    id: bidId,
+    cur: 'USD',
+    seatbid: [
+      {
+        seat: 'mobkoi_debug',
+        bid: [
+          {
+            id: bidId,
+            impid: impressionId,
+            cid: 'campaign_1',
+            crid: 'creative_1',
+            price: 1,
+            cur: [
+              'USD'
+            ],
+            adomain: [
+              'advertiser.com'
+            ],
+            adm,
+            w: 300,
+            h: 250,
+            mtype: 1,
+            lurl,
+            nurl
+          }
+        ]
+      }
+    ],
+  }
+})
+
+const getMockEvents = () => {
   const sizes = [800, 300];
-  const bidId = '3973172c31de61';
   const timestamp = Date.now();
-  const bid = { bidder: 'mobkoi', adUnitCode: 'banner-ad', bidId, ortb2 }
   const auctionOrBidError = {timestamp, error: 'error', bidderRequest: { bidderRequestId: requestId }}
 
   return {
@@ -37,15 +80,15 @@ const getMockEvents = () => {
       auctionId,
       auctionStatus: 'inProgress',
       adUnits: [{
-        adUnitId: '53e7b1dd-9242-453e-b9f0-98b7fed7b971',
+        adUnitId: adUnitId,
         code: 'banner-ad',
         mediaTypes: { banner: { sizes: [sizes] } },
         transactionId,
       }],
       bidderRequests: [{
         bidderRequestId: requestId,
-        bids: [bid],
-        ortb2
+        bids: [getBidRequest()],
+        ortb2: getOrtb2()
       }]
     },
     BID_RESPONSE: {
@@ -67,8 +110,8 @@ const getMockEvents = () => {
       timestamp,
       auctionId,
       bidderRequestId: requestId,
-      bids: [bid],
-      ortb2
+      bids: [getBidRequest()],
+      ortb2: getOrtb2()
     },
     BID_WON: {
       timestamp,
@@ -115,6 +158,25 @@ const getMockEvents = () => {
   }
 }
 
+const getBidRequest = () => ({
+  bidder: bidderCode,
+  adUnitCode: 'banner-ad',
+  transactionId,
+  adUnitId,
+  bidId: bidId,
+  bidderRequestId: requestId,
+  auctionId,
+  ortb2: getOrtb2()
+})
+
+const getBidderRequest = () => ({
+  bidderCode,
+  auctionId,
+  bidderRequestId: requestId,
+  bids: [getBidRequest()],
+  ortb2: getOrtb2()
+})
+
 describe('mobkoiAnalyticsAdapter', function () {
   it('should registers with the adapter manager', function () {
     // should refer to the BIDDER_CODE in the mobkoiAnalyticsAdapter
@@ -131,35 +193,83 @@ describe('mobkoiAnalyticsAdapter', function () {
     let pushEventSpy;
     let flushEventsSpy;
     let triggerBeaconSpy;
+    let postAjaxStub;
+    let sendGetRequestStub;
 
     beforeEach(function () {
       adapter = mobkoiAnalyticsAdapter;
-
       sandbox = sinon.createSandbox({
         useFakeTimers: {
           now: new Date(2025, 0, 8, 0, 1, 33, 425),
         },
       });
 
-      // Enable analytics with fresh context
+      // Disable then reenable the adapter in order to have a fresh context
+      adapter.disableAnalytics();
       adapter.enableAnalytics({
         options: {
-          endpoint: 'http://test-endpoint',
+          endpoint: adServerBaseUrl,
           pid: 'test-pid',
           timeout: defaultTimeout,
         }
       });
 
+      sandbox.stub(internal, 'logInfo');
+      sandbox.stub(internal, 'logWarn');
+      sandbox.stub(internal, 'logError');
+
       // Create spies after enabling analytics to ensure localContext exists
+      postAjaxStub = sandbox.stub(utils, 'postAjax');
+      sendGetRequestStub = sandbox.stub(utils, 'sendGetRequest');
       pushEventSpy = sandbox.spy(adapter.localContext, 'pushEventToAllBidContexts');
       flushEventsSpy = sandbox.spy(adapter.localContext, 'flushAllDebugEvents');
-      triggerBeaconSpy = sandbox.spy(adapter.localContext, 'triggerAllLossBidLossBeacon')
+      triggerBeaconSpy = sandbox.spy(adapter.localContext, 'triggerAllLossBidLossBeacon');
     });
 
     afterEach(function () {
-      sandbox.restore();
       adapter.disableAnalytics();
+      sandbox.restore();
+      postAjaxStub.reset();
+      sendGetRequestStub.reset();
     });
+
+    it('should call sendGetRequest while tracking BIDDER_DONE / BID_WON events', function () {
+      const { AUCTION_INIT, BID_RESPONSE, BID_WON } = getMockEvents();
+      const bidResponse = {
+        ...BID_RESPONSE,
+        ortbBidResponse: {
+          ...BID_RESPONSE.ortbBidResponse,
+          lurl,
+          bidWin: false,
+          lurlTriggered: false
+        }
+      };
+      const eventSequence = [
+        { event: EVENTS.AUCTION_INIT, data: AUCTION_INIT },
+        { event: EVENTS.BID_RESPONSE, data: bidResponse },
+        { event: EVENTS.BID_WON, data: BID_WON },
+      ]
+
+      performStandardAuction(eventSequence);
+
+      expect(sendGetRequestStub.callCount).to.equal(1);
+      expect(sendGetRequestStub.firstCall.args[0]).to.equal(lurl);
+    })
+
+    it('should call postAjax while tracking BIDDER_DONE event', function () {
+      const { AUCTION_INIT, BID_RESPONSE, BIDDER_DONE } = getMockEvents();
+
+      const eventSequence = [
+        { event: EVENTS.AUCTION_INIT, data: AUCTION_INIT },
+        { event: EVENTS.BID_RESPONSE, data: BID_RESPONSE },
+        { event: EVENTS.BIDDER_DONE, data: BIDDER_DONE }
+      ];
+
+      performStandardAuction(eventSequence);
+
+      expect(postAjaxStub.calledOnce).to.be.true;
+      expect(postAjaxStub.firstCall.args[0]).to.equal(`${adServerBaseUrl}/debug`);
+    })
 
     it('should track complete auction workflow in correct sequence and trigger a loss beacon', function () {
       const { AUCTION_INIT, BID_RESPONSE, AUCTION_END, AD_RENDER_SUCCEEDED, BIDDER_DONE } = getMockEvents();
@@ -220,80 +330,6 @@ describe('mobkoiAnalyticsAdapter', function () {
   })
 
   describe('utils', function () {
-    const adServerBaseUrl = 'http://adServerBaseUrl';
-
-    const getBidderRequest = () => ({
-      bidderCode: 'mobkoi',
-      auctionId: '90acf3a8-7710-48f9-8009-f7a985d0e605',
-      bidderRequestId: '2bcbed44fb310c',
-      bids: [{
-        bidder: 'mobkoi',
-        adUnitCode: 'banner-ad',
-        transactionId: 'e4895800-1a69-472c-9e6d-277a1ae1a119',
-        adUnitId: '6d636e93-32ac-4dc6-8a07-fa4167660265',
-        bidId: '3973172c31de61',
-        bidderRequestId: '2bcbed44fb310c',
-        auctionId: '90acf3a8-7710-48f9-8009-f7a985d0e605',
-        ortb2: {
-          site: {
-            publisher: {
-              id: 'mobkoiPublisherId',
-              ext: {
-                adServerBaseUrl
-              }
-            },
-          }
-        }
-      }],
-      ortb2: {
-        site: {
-          publisher: {
-            id: 'mobkoiPublisherId',
-            ext: {
-              adServerBaseUrl
-            }
-          },
-        },
-      }
-    })
-
-    const adm = '<div>test ad</div>';
-    const lurl = 'test.com/loss';
-    const nurl = 'test.com/win';
-
-    const getBidderResponse = () => ({
-      body: {
-        id: '2bcbed44fb310c',
-        cur: 'USD',
-        seatbid: [
-          {
-            seat: 'mobkoi_debug',
-            bid: [
-              {
-                id: '2bcbed44fb310c',
-                impid: '3973172c31de61',
-                cid: 'campaign_1',
-                crid: 'creative_1',
-                price: 1,
-                cur: [
-                  'USD'
-                ],
-                adomain: [
-                  'advertiser.com'
-                ],
-                adm,
-                w: 300,
-                h: 250,
-                mtype: 1,
-                lurl,
-                nurl
-              }
-            ]
-          }
-        ],
-      }
-    })
-
     let bidderRequest;
 
     beforeEach(function () {
