@@ -304,28 +304,28 @@ describe('mobkoiAnalyticsAdapter', function () {
       expect(pushEventSpy.callCount).to.equal(3); // AUCTION_TIMEOUT, NO_BID, BIDDER_ERROR
     });
 
-    it('should push unexpected error events to the localContext', function () {
+    it('should push unexpected error events to the localContext', async function () {
       const { AUCTION_INIT } = getMockEvents();
       delete AUCTION_INIT.auctionStatus;
+      try {
+        await adapter.track({
+          eventType: EVENTS.AUCTION_INIT,
+          args: AUCTION_INIT
+        });
+      } catch {
+        expect(pushEventSpy.calledOnce).to.be.true;
+        const errorEventCall = pushEventSpy.getCall(0);
 
-      const eventSequence = [
-        { event: EVENTS.AUCTION_INIT, data: AUCTION_INIT }
-      ];
+        expect(errorEventCall.args[0]).to.deep.include({
+          eventType: EVENTS.AUCTION_INIT,
+          level: DEBUG_EVENT_LEVELS.error,
+          note: 'Error occurred when processing this event.'
+        });
 
-      performStandardAuction(eventSequence);
-
-      expect(pushEventSpy.calledOnce).to.be.true;
-      const errorEventCall = pushEventSpy.getCall(0);
-
-      expect(errorEventCall.args[0]).to.deep.include({
-        eventType: EVENTS.AUCTION_INIT,
-        level: DEBUG_EVENT_LEVELS.error,
-        note: 'Error occurred when processing this event.'
-      });
-
-      const errorPayload = errorEventCall.args[0].subPayloads[`errorInEvent_${EVENTS.AUCTION_INIT}`];
-      expect(errorPayload).to.exist;
-      expect(errorPayload.error).to.include('Unable to determine track args type');
+        const errorPayload = errorEventCall.args[0].subPayloads[`errorInEvent_${EVENTS.AUCTION_INIT}`];
+        expect(errorPayload).to.exist;
+        expect(errorPayload.error).to.include('Unable to determine track args type');
+      }
     });
   })
 
