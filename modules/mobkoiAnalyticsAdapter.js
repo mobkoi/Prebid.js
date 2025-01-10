@@ -49,7 +49,7 @@ const CUSTOM_EVENTS = {
   BID_LOSS: 'bidLoss',
 };
 
-const DEBUG_EVENT_LEVELS = {
+export const DEBUG_EVENT_LEVELS = {
   info: 'info',
   warn: 'warn',
   error: 'error',
@@ -62,7 +62,7 @@ const DEBUG_EVENT_LEVELS = {
  */
 const COMMON_FIELDS_TO_OMIT = ['ad', 'adm'];
 
-class LocalContext {
+export class LocalContext {
   /**
    * A map of impression ID (ORTB terms) to BidContext object
    */
@@ -957,10 +957,10 @@ class Event {
 }
 
 /**
-   * Various types of payloads that are submitted to the server for debugging.
-   * Mostly they are obtain from the Prebid event args.
-   */
-const SUB_PAYLOAD_TYPES = {
+ * Various types of payloads that are submitted to the server for debugging.
+ * Mostly they are obtain from the Prebid event args.
+ */
+export const SUB_PAYLOAD_TYPES = {
   AUCTION: 'prebid_auction',
   BIDDER_REQUEST: 'bidder_request',
   ORTB_BID: 'ortb_bid',
@@ -975,7 +975,7 @@ const SUB_PAYLOAD_TYPES = {
 /**
  * Fields that are unique to objects used to identify the sub-payload type.
  */
-const SUB_PAYLOAD_UNIQUE_FIELDS_LOOKUP = {
+export const SUB_PAYLOAD_UNIQUE_FIELDS_LOOKUP = {
   [SUB_PAYLOAD_TYPES.AUCTION]: ['auctionStatus'],
   [SUB_PAYLOAD_TYPES.BIDDER_REQUEST]: ['bidderRequestId'],
   [SUB_PAYLOAD_TYPES.ORTB_BID]: ['adm', 'impid'],
@@ -1200,6 +1200,7 @@ export const utils = {
           `Identify fields for type "${type}" is not defined in COMMON_OBJECT_UNIT_FIELDS.`
         );
       }
+
       // If all fields are available in the object, then it's the type we are looking for
       if (identifyFields.every(field => eventArgs.hasOwnProperty(field))) {
         objType = type;
