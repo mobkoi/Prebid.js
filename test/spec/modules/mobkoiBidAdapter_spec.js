@@ -40,6 +40,9 @@ describe('Mobkoi bidding Adapter', function () {
 
   const getConvertedBidRequest = () => ({
     id: requestId,
+    cur: [
+      'USD'
+    ],
     imp: [{
       id: bidId,
     }],

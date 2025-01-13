@@ -1,11 +1,8 @@
-# HeaderBiddingAdapter
-
 # Overview
 
-```
 Module Name: Mobkoi Bidder Adapter
 Module Type: Bidder Adapter
-```
+Maintainer: platformteam@mobkoi.com
 
 # Description
 
