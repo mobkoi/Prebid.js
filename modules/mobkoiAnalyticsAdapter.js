@@ -241,15 +241,16 @@ export class LocalContext {
   /**
    * Push an debug event to all bid contexts. This is useful for events that are
    * related to all bids in the auction.
-   * @param {*} eventType Prebid event type or custom event type
-   * @param {*} level Debug level of the event. It can be one of the following:
+   * @param {Object} params Object containing the event details
+   * @param {*} params.eventType Prebid event type or custom event type
+   * @param {*} params.level Debug level of the event. It can be one of the following:
    * - info
    * - warn
    * - error
-   * @param {*} timestamp Default to current timestamp if not provided.
-   * @param {*} note Optional field. Additional information about the event.
-   * @param {*} payload Field values from event args that are useful for
-   * debugging. Payload cross events will merge into one object.
+   * @param {*} params.timestamp Default to current timestamp if not provided.
+   * @param {*} params.note Optional field. Additional information about the event.
+   * @param {*} params.subPayloads Objects containing additional data that are
+   * obtain from to the Prebid events indexed by SUB_PAYLOAD_TYPES.
    */
   pushEventToAllBidContexts({eventType, level, timestamp, note, subPayloads}) {
     // Create one event for each impression ID
@@ -861,11 +862,10 @@ class BidContext {
   }
 
   /**
-   * Push a debug event to the context which will submitted to server for debugging.
-   * @param {*} eventInstance DebugEvent object. If it does not contain the same
-   * impid as the BidContext, event will be ignored.
-   * @param {*} subPayloads Object contains various payloads that obtained form
-   * the Prebid Event args. The payloads will be merged to the existing subPayloads.
+   * Push a debug event to the context which will be submitted to the server for debugging.
+   * @param {Object} params Object containing the following properties:
+   * @param {Event} params.eventInstance - DebugEvent object. If it does not contain the same impid as the BidContext, the event will be ignored.
+   * @param {Object|null} params.subPayloads - Object containing various payloads obtained from the Prebid Event args. The payloads will be merged into the existing subPayloads.
    */
   pushEvent({eventInstance, subPayloads}) {
     if (!(eventInstance instanceof Event)) {
@@ -1280,7 +1280,7 @@ export const utils = {
 
   /**
    * Recursively omit the given keys from the object.
-   * @param {*} obj - The object to process.
+   * @param {*} subPayloads - The payload objects index by their payload types.
    * @throws {Error} - If the given object is not valid.
    */
   validateSubPayloads: function (subPayloads) {
