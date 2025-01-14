@@ -72,14 +72,12 @@ export const spec = {
 
     // Get the ortb2 configuration
     const globalConfig = config.getConfig();
-    console.log('globalConfig', globalConfig);
     const adServerBaseUrl = deepAccess(globalConfig, `ortb2.site.publisher.ext.${PARAM_NAME_AD_SERVER_BASE_URL}`);
 
     if (syncOptions.pixelEnabled) {
-      const setUidCookieEndpoint = new URL('/setuid', adServerBaseUrl)
-      setUidCookieEndpoint.searchParams.set('cookieValue', '[mobkoi_uid]');
-      setUidCookieEndpoint.searchParams.set('cookieName', 'mobkoi_uid');
-      const setUidCallback = encodeURIComponent(setUidCookieEndpoint);
+      const setUidCallback = new URL('/setuid', adServerBaseUrl)
+      setUidCallback.searchParams.set('value', '[mobkoi_uid]');
+      setUidCallback.searchParams.set('name', 'mobkoi_uid');
 
       syncs.push(userSyncsIntegration.mobkoi(setUidCallback, adServerBaseUrl));
       // syncs.push(userSyncsIntegration.equativ(setUidCallback, gdprConsent));
