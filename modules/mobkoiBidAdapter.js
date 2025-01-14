@@ -1,6 +1,7 @@
 import { ortbConverter } from '../libraries/ortbConverter/converter.js';
 import { registerBidder } from '../src/adapters/bidderFactory.js';
 import { BANNER } from '../src/mediaTypes.js';
+import { config } from 'src/config.js';
 import { _each, replaceMacros, deepAccess, deepSetValue, logError } from '../src/utils.js';
 
 const BIDDER_CODE = 'mobkoi';
@@ -39,9 +40,53 @@ export const converter = ortbConverter({
   },
 });
 
+const userSyncsIntegration = {
+  equativ: function(setUidCallback, gdprConsent) {
+    const url = new URL('https://sync.smartadserver.com/getuid');
+    url.searchParams.set('url', setUidCallback);
+    url.searchParams.set('nwid', '5290');
+    url.searchParams.set('gdpr_consent', gdprConsent ? gdprConsent.consentString : '');
+
+    return {
+      type: 'image',
+      url: url.toString()
+    }
+  },
+  mobkoi: function(setUidCallback, adServerBaseUrl) {
+    const url = new URL('/getuid', adServerBaseUrl);
+    url.searchParams.set('callbackUrl', setUidCallback);
+
+    return {
+      type: 'image',
+      url: url.toString()
+    }
+  }
+}
+
 export const spec = {
   code: BIDDER_CODE,
   supportedMediaTypes: [BANNER],
+
+  getUserSyncs: function(syncOptions, _serverResponses, gdprConsent) {
+    const syncs = [];
+
+    // Get the ortb2 configuration
+    const globalConfig = config.getConfig();
+    console.log('globalConfig', globalConfig);
+    const adServerBaseUrl = deepAccess(globalConfig, `ortb2.site.publisher.ext.${PARAM_NAME_AD_SERVER_BASE_URL}`);
+
+    if (syncOptions.pixelEnabled) {
+      const setUidCookieEndpoint = new URL('/setuid', adServerBaseUrl)
+      setUidCookieEndpoint.searchParams.set('cookieValue', '[mobkoi_uid]');
+      setUidCookieEndpoint.searchParams.set('cookieName', 'mobkoi_uid');
+      const setUidCallback = encodeURIComponent(setUidCookieEndpoint);
+
+      syncs.push(userSyncsIntegration.mobkoi(setUidCallback, adServerBaseUrl));
+      // syncs.push(userSyncsIntegration.equativ(setUidCallback, gdprConsent));
+    }
+
+    return syncs;
+  },
 
   isBidRequestValid(bid) {
     if (!deepAccess(bid, 'ortb2.site.publisher.id')) {
