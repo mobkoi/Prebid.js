@@ -40,51 +40,9 @@ export const converter = ortbConverter({
   },
 });
 
-const userSyncsIntegration = {
-  equativ: function(setUidCallback, gdprConsent) {
-    const url = new URL('https://sync.smartadserver.com/getuid');
-    url.searchParams.set('url', setUidCallback);
-    url.searchParams.set('nwid', '5290');
-    url.searchParams.set('gdpr_consent', gdprConsent ? gdprConsent.consentString : '');
-
-    return {
-      type: 'image',
-      url: url.toString()
-    }
-  },
-  mobkoi: function(setUidCallback, adServerBaseUrl) {
-    const url = new URL('/getuid', adServerBaseUrl);
-    url.searchParams.set('callbackUrl', setUidCallback);
-
-    return {
-      type: 'image',
-      url: url.toString()
-    }
-  }
-}
-
 export const spec = {
   code: BIDDER_CODE,
   supportedMediaTypes: [BANNER],
-
-  getUserSyncs: function(syncOptions, _serverResponses, gdprConsent) {
-    const syncs = [];
-
-    // Get the ortb2 configuration
-    const globalConfig = config.getConfig();
-    const adServerBaseUrl = deepAccess(globalConfig, `ortb2.site.publisher.ext.${PARAM_NAME_AD_SERVER_BASE_URL}`);
-
-    if (syncOptions.pixelEnabled) {
-      const setUidCallback = new URL('/setuid', adServerBaseUrl)
-      setUidCallback.searchParams.set('value', '[mobkoi_uid]');
-      setUidCallback.searchParams.set('name', 'mobkoi_uid');
-
-      syncs.push(userSyncsIntegration.mobkoi(setUidCallback, adServerBaseUrl));
-      // syncs.push(userSyncsIntegration.equativ(setUidCallback, gdprConsent));
-    }
-
-    return syncs;
-  },
 
   isBidRequestValid(bid) {
     if (!deepAccess(bid, 'ortb2.site.publisher.id')) {
@@ -128,7 +86,6 @@ export const spec = {
 registerBidder(spec);
 
 export const utils = {
-
   /**
    * !IMPORTANT: Make sure the implementation of this function matches getAdServerEndpointBaseUrl
    * in both adapters.
