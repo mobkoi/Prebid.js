@@ -8,9 +8,7 @@
 import { submodule } from '../src/hook.js';
 import { MODULE_TYPE_UID } from '../src/activities/modules.js';
 import { getStorageManager } from '../src/storageManager.js';
-import { logError, logInfo, deepAccess } from '../src/utils.js';
-import { ajax } from '../src/ajax.js';
-import { config } from '../src/config.js';
+import { logError, logInfo, deepAccess, insertUserSyncIframe, triggerPixel, buildUrl } from '../src/utils.js';
 
 const GVL_ID = 898;
 const MODULE_NAME = 'mobkoiId';
@@ -52,14 +50,14 @@ export const mobkoiIdSubmodule = {
 
     return {
       callback: () => {
-        requestMobkoiUserId(
-          userSyncOptions,
-          (userId) => {
-            if (userId) {
-              storeValue(StorageKeys.mobkoiUid, userId);
-            }
-          }
-        );
+        // requestMobkoiUserId(
+        //   userSyncOptions,
+        //   (userId) => {
+        //     if (userId) {
+        //       storeValue(StorageKeys.mobkoiUid, userId);
+        //     }
+        //   }
+        // );
 
         requestEquativUserId(
           userSyncOptions,
@@ -79,42 +77,47 @@ submodule('userId', mobkoiIdSubmodule);
 
 function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) {
   logInfo('Requesting Equativ SAS ID');
-  const adServerBaseUrl = deepAccess(syncUserOptions, `params.${PARAM_NAME_AD_SERVER_BASE_URL}`) || PROD_AD_SERVER_BASE_URL;
+  const adServerBaseUrl = new URL(deepAccess(syncUserOptions, `params.${PARAM_NAME_AD_SERVER_BASE_URL}`) || PROD_AD_SERVER_BASE_URL);
 
-  const setUidCallback = new URL('/echo', adServerBaseUrl);
-  setUidCallback.searchParams.set('value', '[sas_uid]');
+  const setUidCallback = buildUrl({
+    protocol: 'http',
+    hostname: adServerBaseUrl.hostname,
+    pathname: '/echo',
+    search: {
+      value: '[sas_uid]'
+    }
+  })
+  // const setUidCallback = new URL('/echo', adServerBaseUrl);
+  // setUidCallback.searchParams.set('value', '[sas_uid]');
+  console.log('setUidCallback', setUidCallback);
 
   const workingGdpr = 'CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA';
+  // https://sync.smartadserver.com/getuid?url=http://localhost/echo?value=%5Bsas_uid%5D&nwid=5290&gdprConsent=CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA
+  const smartadserverUrl = buildUrl({
+    protocol: 'https',
+    hostname: 'sync.smartadserver.com',
+    pathname: '/getuid',
+    search: {
+      url: encodeURIComponent(setUidCallback),
+      nwid: '5290',
+      gdprConsent: workingGdpr
+    }
+  });
 
-  const url = new URL('https://sync.smartadserver.com/getuid');
-  url.searchParams.set('url', setUidCallback);
-  url.searchParams.set('nwid', '5290');
-  // url.searchParams.set('gdpr_consent', gdprConsent ? gdprConsent.consentString : '');
-  url.searchParams.set('gdpr_consent', workingGdpr);
+  console.log('smartadserverUrl', smartadserverUrl);
 
-  ajax(
-    url.toString(),
-    {
-      success: (data) => {
-        logInfo({data});
-        try {
-          const userId = JSON.parse(data).value;
-          onCompleteCallback(userId);
-        } catch (e) {
-          logError('Error parsing Equativ ID response:', e);
-          onCompleteCallback(null);
-        }
-      },
-      error: (status, error) => {
-        logError('Error fetching Equativ ID:', status, error);
-        onCompleteCallback(null);
-      }
-    },
-    null,
-    {
-      method: 'GET',
-      withCredentials: true
-    });
+  const workingUrl = `https://sync.smartadserver.com/getuid?url=http%3A%2F%2Flocalhost:8000%2Fecho%3Fvalue%3D[sas_uid]&gdpr_consent=CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA&&nwid=5290`
+
+  triggerPixel(workingUrl, (data) => {
+    logInfo({data});
+    try {
+      // const userId = JSON.parse(data).value;
+      // onCompleteCallback(userId);
+    } catch (e) {
+      logError('Error parsing Equativ ID response:', e);
+      onCompleteCallback(null);
+    }
+  });
 }
 
 function requestMobkoiUserId(syncUserOptions, onCompleteCallback) {
@@ -127,29 +130,62 @@ function requestMobkoiUserId(syncUserOptions, onCompleteCallback) {
   const getUidUrl = new URL('/getuid', adServerBaseUrl);
   getUidUrl.searchParams.set('callbackUrl', setUidCallback.toString());
 
-  ajax(
-    getUidUrl.toString(),
-    {
-      success: (data) => {
-        try {
-          const userId = JSON.parse(data).value;
-          logInfo(`Successfully fetched Mobkoi UID: ${userId}`);
-          onCompleteCallback(userId);
-        } catch (e) {
-          logError('Error parsing Mobkoi ID response:', e);
-          onCompleteCallback(null);
-        }
-      },
-      error: (status, error) => {
-        logError('Error fetching Mobkoi UID:', status, error);
-        onCompleteCallback(null);
-      }
-    },
-    null,
-    {
-      method: 'GET',
-      withCredentials: true
-    });
+  console.log('getUidUrl', getUidUrl.toString());
+  // const exampleFromDoc = `https://sync.smartadserver.com/getuid?url=https%3A%2F%2Fads.cname.com%2Fsetuid%3Fuid%3D[sas_uid]&gdpr_consent=CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE&nwid=${5290}`
+  const testUrl = `https://sync.smartadserver.com/getuid?url=https%3A%2F%2Fads.cname.com%2Fsetuid%3Fuid%3D[sas_uid]&gdpr_consent=CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA&&nwid=5290`
+
+  triggerPixel(testUrl, (iframe) => {
+    try {
+      // const finalUrl = iframe.src;
+      // const userId = extractUserIdFromUrl(finalUrl);
+      // logInfo(`Successfully fetched Mobkoi UID: ${userId}`);
+      // onCompleteCallback(userId);
+    } catch (e) {
+      logError('Error parsing Mobkoi ID response:', e);
+      onCompleteCallback(null);
+    }
+  });
+
+  // ajax(
+  //   getUidUrl.toString(),
+  //   {
+  //     success: (data) => {
+  //       try {
+  //         const userId = JSON.parse(data).value;
+  //         logInfo(`Successfully fetched Mobkoi UID: ${userId}`);
+  //         onCompleteCallback(userId);
+  //       } catch (e) {
+  //         logError('Error parsing Mobkoi ID response:', e);
+  //         onCompleteCallback(null);
+  //       }
+  //     },
+  //     error: (status, error) => {
+  //       logError('Error fetching Mobkoi UID:', status, error);
+  //       onCompleteCallback(null);
+  //     }
+  //   },
+  //   null,
+  //   {
+  //     method: 'GET',
+  //     withCredentials: true
+  //   });
+}
+
+/**
+ * Extracts the user ID from the given URL.
+ * @param {*} url
+ * @returns
+ * @example
+ * // https://adserver.maximus.mobkoi.com/echo?value=mobkoi_12345
+ * // returns "mobkoi_12345"
+ */
+function extractUserIdFromUrl(url) {
+  try {
+    const match = url.match(/[?&]value=([^&#]*)/i);
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch (error) {
+    return null;
+  }
 }
 
 function storeValue(storageKey, value) {
