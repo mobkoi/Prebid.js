@@ -8,7 +8,8 @@
 import { submodule } from '../src/hook.js';
 import { MODULE_TYPE_UID } from '../src/activities/modules.js';
 import { getStorageManager } from '../src/storageManager.js';
-import { logError, logInfo, deepAccess, insertUserSyncIframe, triggerPixel, buildUrl } from '../src/utils.js';
+import { logError, logInfo, deepAccess, insertUserSyncIframe, triggerPixel } from '../src/utils.js';
+import { ajax } from '../src/ajax.js';
 
 const GVL_ID = 898;
 const MODULE_NAME = 'mobkoiId';
@@ -79,37 +80,27 @@ function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) 
   logInfo('Requesting Equativ SAS ID');
   const adServerBaseUrl = new URL(deepAccess(syncUserOptions, `params.${PARAM_NAME_AD_SERVER_BASE_URL}`) || PROD_AD_SERVER_BASE_URL);
 
-  const setUidCallback = buildUrl({
-    protocol: 'http',
-    hostname: adServerBaseUrl.hostname,
-    pathname: '/echo',
-    search: {
-      value: '[sas_uid]'
-    }
-  })
-  // const setUidCallback = new URL('/echo', adServerBaseUrl);
-  // setUidCallback.searchParams.set('value', '[sas_uid]');
-  console.log('setUidCallback', setUidCallback);
+  console.log('syncUserOptions', syncUserOptions);
+
+  const setUidCallback = encodeURIComponent('http://adserver.local.mobkoi.com/setuid?') +
+    encodeURIComponent('uid=') + '[sas_uid]' +
+    encodeURIComponent('&cookieName=sas_id');
 
   const workingGdpr = 'CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA';
-  // https://sync.smartadserver.com/getuid?url=http://localhost/echo?value=%5Bsas_uid%5D&nwid=5290&gdprConsent=CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA
-  const smartadserverUrl = buildUrl({
-    protocol: 'https',
-    hostname: 'sync.smartadserver.com',
-    pathname: '/getuid',
-    search: {
-      url: encodeURIComponent(setUidCallback),
-      nwid: '5290',
-      gdprConsent: workingGdpr
-    }
-  });
 
-  console.log('smartadserverUrl', smartadserverUrl);
+  const smartadserverUrl = new URL('/getuid', 'https://sync.smartadserver.com');
+  smartadserverUrl.searchParams.set('url', setUidCallback.toString());
+  smartadserverUrl.searchParams.set('nwid', '5290');
+  smartadserverUrl.searchParams.set('gdpr_consent', workingGdpr);
 
-  const workingUrl = `https://sync.smartadserver.com/getuid?url=http%3A%2F%2Flocalhost:8000%2Fecho%3Fvalue%3D[sas_uid]&gdpr_consent=CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA&&nwid=5290`
+  console.log('smartadserverUrl', smartadserverUrl.toString());
 
-  triggerPixel(workingUrl, (data) => {
-    logInfo({data});
+  const workingUrl = `https://sync.smartadserver.com/getuid?url=` + encodeURIComponent('http://adserver.local.mobkoi.com/setuid?uid=') + '[sas_uid]' + encodeURIComponent('&cookieName=sas_id') + `&gdpr_consent=CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA&nwid=5290`
+
+  console.log('workingUrl', workingUrl);
+
+  triggerPixel(workingUrl, function (data) {
+    logInfo({data, this: this});
     try {
       // const userId = JSON.parse(data).value;
       // onCompleteCallback(userId);
