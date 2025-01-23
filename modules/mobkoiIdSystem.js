@@ -60,15 +60,15 @@ export const mobkoiIdSubmodule = {
         //   }
         // );
 
-        requestEquativUserId(
-          userSyncOptions,
-          gdprConsent,
-          (userId) => {
-            if (userId) {
-              storeValue(StorageKeys.equativSasId, userId);
-            }
-          }
-        );
+        // requestEquativUserId(
+        //   userSyncOptions,
+        //   gdprConsent,
+        //   (userId) => {
+        //     if (userId) {
+        //       storeValue(StorageKeys.equativSasId, userId);
+        //     }
+        //   }
+        // );
       }
     };
   },
@@ -79,36 +79,36 @@ submodule('userId', mobkoiIdSubmodule);
 function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) {
   logInfo('Requesting Equativ SAS ID');
   const adServerBaseUrl = new URL(deepAccess(syncUserOptions, `params.${PARAM_NAME_AD_SERVER_BASE_URL}`) || PROD_AD_SERVER_BASE_URL);
+  const cookieName = deepAccess(syncUserOptions, 'storage.name');
+  const gdprConsentString = gdprConsent && gdprConsent.gdprApplies ? gdprConsent.consentString : null;
 
-  console.log('syncUserOptions', syncUserOptions);
+  if (!cookieName) {
+    logError('Equativ SAS ID requires a storage name to be defined');
+    return;
+  }
 
-  const setUidCallback = encodeURIComponent('http://adserver.local.mobkoi.com/setuid?') +
+  const setUidCallback = encodeURIComponent(`${adServerBaseUrl}setuid?`) +
     encodeURIComponent('uid=') + '[sas_uid]' +
-    encodeURIComponent('&cookieName=sas_id');
+    encodeURIComponent(`&cookieName=${cookieName}`);
 
-  const workingGdpr = 'CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA';
+  // const workingGdpr = 'CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA';
 
-  const smartadserverUrl = new URL('/getuid', 'https://sync.smartadserver.com');
-  smartadserverUrl.searchParams.set('url', setUidCallback.toString());
-  smartadserverUrl.searchParams.set('nwid', '5290');
-  smartadserverUrl.searchParams.set('gdpr_consent', workingGdpr);
+  const smartServerUrl = `https://sync.smartadserver.com/getuid?url=` +
+    setUidCallback +
+    `&gdpr_consent=${gdprConsentString}` +
+    `&nwid=5290`;
 
-  console.log('smartadserverUrl', smartadserverUrl.toString());
-
-  const workingUrl = `https://sync.smartadserver.com/getuid?url=` + encodeURIComponent('http://adserver.local.mobkoi.com/setuid?uid=') + '[sas_uid]' + encodeURIComponent('&cookieName=sas_id') + `&gdpr_consent=CQLOJoAQLOJoABIACDPLBYFkAP_gAEPgAB5YKvtX_G__bWlr8X73aftkeY1P99h77sQxBhfJE-4FzLvW_JwXx2ExNA36tqIKmRIAu3TBIQNlGJDURVCgaogVryDMaEyUoTNKJ6BkiFMRI2dYCFxvm4tjeQCY5vr991dx2B-t7dr83dzyy4hHn3a5_2S0WJCdA5-tDfv9bROb-9IOd_x8v4v4_F_pE2_eT1l_tWvp7D9-cts_9XW99_ffff9Pn_-uB_-_X_vf_H34KvgEmGhUQBlgSEhBoGEECAFQVhARQIAgAASBogIATBgU7AwAXWEiAEAKAAYIAQAAgyABAAABAAhEAEABQIAAIBAoAAwAIBgIACBgABABYCAQAAgOgYpgQQCBYAJGZFQpgQhAJBAS2VCCQBAgrhCEWeARAIiYKAAAAAApAAEBYLA4kkBKhIIAuINoAACABAIIAChBJyYAAgDNlqDwYNoytMAwfMEiGmAZAEQRkJBoAAAA.YAAAAAAAAAAA&nwid=5290`
-
-  console.log('workingUrl', workingUrl);
-
-  triggerPixel(workingUrl, function (data) {
-    logInfo({data, this: this});
-    try {
-      // const userId = JSON.parse(data).value;
-      // onCompleteCallback(userId);
-    } catch (e) {
-      logError('Error parsing Equativ ID response:', e);
-      onCompleteCallback(null);
-    }
-  });
+  insertUserSyncIframe(smartServerUrl);
+  // triggerPixel(smartServerUrl, () => {
+  //   try {
+  //     logInfo();
+  //     // const userId = JSON.parse(data).value;
+  //     // onCompleteCallback(userId);
+  //   } catch (e) {
+  //     logError('Error parsing Equativ ID response:', e);
+  //     onCompleteCallback(null);
+  //   }
+  // });
 }
 
 function requestMobkoiUserId(syncUserOptions, onCompleteCallback) {
@@ -160,23 +160,6 @@ function requestMobkoiUserId(syncUserOptions, onCompleteCallback) {
   //     method: 'GET',
   //     withCredentials: true
   //   });
-}
-
-/**
- * Extracts the user ID from the given URL.
- * @param {*} url
- * @returns
- * @example
- * // https://adserver.maximus.mobkoi.com/echo?value=mobkoi_12345
- * // returns "mobkoi_12345"
- */
-function extractUserIdFromUrl(url) {
-  try {
-    const match = url.match(/[?&]value=([^&#]*)/i);
-    return match ? decodeURIComponent(match[1]) : null;
-  } catch (error) {
-    return null;
-  }
 }
 
 function storeValue(storageKey, value) {
