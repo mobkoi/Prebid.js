@@ -103,6 +103,10 @@ describe('Mobkoi bidding Adapter', function () {
       expect(spec.isBidRequestValid(bid)).to.equal(true);
     });
 
+    it('should return true when placement id exist in ad unit params', function () {
+      expect(spec.isBidRequestValid(bid)).to.equal(true);
+    });
+
     it('should return true when publisher ID only exists in ad unit params', function () {
       delete bid.ortb2.site.publisher.id;
       expect(spec.isBidRequestValid(bid)).to.equal(true);
@@ -121,6 +125,11 @@ describe('Mobkoi bidding Adapter', function () {
     it('should return false when publisher id is missing both in ad unit params and ortb2', function () {
       delete bid.ortb2.site.publisher.id;
       delete bid.params.publisherId;
+      expect(spec.isBidRequestValid(bid)).to.equal(false);
+    });
+
+    it('should return false when placement id is missing in ad unit params', function () {
+      delete bid.params.placementId;
       expect(spec.isBidRequestValid(bid)).to.equal(false);
     });
 

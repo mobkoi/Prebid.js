@@ -70,6 +70,14 @@ export const spec = {
     }
 
     if (
+      !deepAccess(bid, `params.${PUBLISHER_PARAMS.PARAM_NAME_PLACEMENT_ID}`)
+    ) {
+      logError(`The ${PUBLISHER_PARAMS.PARAM_NAME_PLACEMENT_ID} field is required in the bid request. ` +
+        'Please follow the setup guideline to set the placement ID field.')
+      return false;
+    }
+
+    if (
       !deepAccess(bid, `params.${PUBLISHER_PARAMS.PARAM_NAME_AD_SERVER_BASE_URL}`) &&
       !deepAccess(bid, 'ortb2.site.publisher.ext.adServerBaseUrl')) {
       logError(

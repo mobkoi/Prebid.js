@@ -44,3 +44,10 @@ To serve Prebid.js locally with specific modules, you can use the following comm
 
 ```sh
 gulp serve-fast --modules=consentManagementTcf,tcfControl,mobkoiBidAdapter
+```
+
+# Run bid adapter test locally
+
+```sh
+gulp test --file=test/spec/modules/mobkoiBidAdapter_spec.js
+```
