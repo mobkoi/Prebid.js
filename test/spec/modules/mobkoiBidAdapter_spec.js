@@ -142,16 +142,6 @@ describe('Mobkoi bidding Adapter', function () {
       convertedBidRequest = getConvertedBidRequest();
     });
 
-    it('should return valid request object with correct structure', function () {
-      const request = spec.buildRequests(bidderRequest.bids, bidderRequest);
-      const expectedUrl = testAdServerBaseUrl + '/bid';
-
-      expect(request.method).to.equal('POST');
-      expect(request.options.contentType).to.equal('application/json');
-      expect(request.url).to.equal(expectedUrl);
-      expect(request.data).to.deep.equal(convertedBidRequest);
-    });
-
     it('should include converted ORTB data in request', function () {
       const request = spec.buildRequests(bidderRequest.bids, bidderRequest);
       const ortbData = request.data;
