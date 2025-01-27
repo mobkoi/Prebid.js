@@ -4,6 +4,7 @@ import { BANNER } from '../src/mediaTypes.js';
 import { _each, replaceMacros, deepAccess, deepSetValue, logError } from '../src/utils.js';
 
 const BIDDER_CODE = 'mobkoi';
+const GVL_ID = 898;
 /**
  * !IMPORTANT: This value must match the value in mobkoiAnalyticsAdapter.js
  * The name of the parameter that the publisher can use to specify the ad server endpoint.
@@ -42,6 +43,7 @@ export const converter = ortbConverter({
 export const spec = {
   code: BIDDER_CODE,
   supportedMediaTypes: [BANNER],
+  gvlid: GVL_ID,
 
   isBidRequestValid(bid) {
     if (!deepAccess(bid, 'ortb2.site.publisher.id')) {
@@ -85,7 +87,6 @@ export const spec = {
 registerBidder(spec);
 
 export const utils = {
-
   /**
    * !IMPORTANT: Make sure the implementation of this function matches getAdServerEndpointBaseUrl
    * in both adapters.
