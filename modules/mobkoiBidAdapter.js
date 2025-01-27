@@ -52,12 +52,15 @@ export const spec = {
   supportedMediaTypes: [BANNER],
   gvlid: GVL_ID,
 
+  /**
+   * Determines whether or not the given bid request is valid.
+   */
   isBidRequestValid(bid) {
     if (
       !deepAccess(bid, `params.${PUBLISHER_PARAMS.PARAM_NAME_PUBLISHER_ID}`) &&
       !deepAccess(bid, 'ortb2.site.publisher.id')
     ) {
-      logError(`The ${PUBLISHER_PARAMS.PARAM_NAME_PUBLISHER_ID} field is required in the bid request.` +
+      logError(`The ${PUBLISHER_PARAMS.PARAM_NAME_PUBLISHER_ID} field is required in the bid request. ` +
         'Please follow the setup guideline to set the publisher ID field.'
       );
       return false;
@@ -75,7 +78,9 @@ export const spec = {
 
     return true;
   },
-
+  /**
+   * Make a server request from the list of BidRequests.
+   */
   buildRequests(prebidBidRequests, prebidBidderRequest) {
     const adServerEndpoint = utils.getAdServerEndpointBaseUrl(prebidBidderRequest) + '/bid';
 
@@ -91,7 +96,9 @@ export const spec = {
       }),
     };
   },
-
+  /**
+   * Unpack the response from the server into a list of bids.
+   */
   interpretResponse(serverResponse, customBidRequest) {
     if (!serverResponse.body) return [];
 
