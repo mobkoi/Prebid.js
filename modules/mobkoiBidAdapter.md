@@ -24,6 +24,7 @@ const adUnits = [
         bidder: 'mobkoi',
         params: {
           publisherId: 'module-test-publisher-id',
+          placementId: 'moudle-test-placement-id',
           adServerBaseUrl: 'https://adserver.maximus.mobkoi.com',
         }
       },
