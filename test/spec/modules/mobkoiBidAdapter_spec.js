@@ -2,13 +2,14 @@ import {spec, utils} from 'modules/mobkoiBidAdapter.js';
 
 describe('Mobkoi bidding Adapter', function () {
   const testAdServerBaseUrl = 'http://test.adServerBaseUrl.com';
-  const testRequestId = 'test-request-id'
-  const testPublisherId = 'mobkoiPublisherId'
-  const testBidId = 'test-bid-id'
-  const bidderCode = 'mobkoi'
-  const testTransactionId = 'test-transaction-id'
-  const testAdUnitId = 'test-ad-unit-id'
-  const testAuctionId = 'test-auction-id'
+  const testRequestId = 'test-request-id';
+  const testPublisherId = 'mobkoiPublisherId';
+  const testPlacementId = 'mobkoiPlacementId';
+  const testBidId = 'test-bid-id';
+  const bidderCode = 'mobkoi';
+  const testTransactionId = 'test-transaction-id';
+  const testAdUnitId = 'test-ad-unit-id';
+  const testAuctionId = 'test-auction-id';
 
   const getOrtb2 = () => ({
     site: {
@@ -30,7 +31,8 @@ describe('Mobkoi bidding Adapter', function () {
     ortb2: getOrtb2(),
     params: {
       publisherId: testPublisherId,
-      adServerBaseUrl: testAdServerBaseUrl
+      adServerBaseUrl: testAdServerBaseUrl,
+      placementId: testPlacementId
     }
   })
 
@@ -46,6 +48,7 @@ describe('Mobkoi bidding Adapter', function () {
     id: testRequestId,
     imp: [{
       id: testBidId,
+      tagid: testPlacementId,
     }],
     ...getOrtb2(),
     test: 0
