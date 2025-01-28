@@ -119,7 +119,7 @@ function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) 
   });
 
   insertUserSyncIframe(url, () => {
-    // console.log('Iframe loaded');
+    console.log('insertUserSyncIframe loaded');
     // const iframes = document.getElementsByTagName('iframe');
     // for (let i = 0; i < iframes.length; i++) {
     //   if (iframes[i].src === url) {
