@@ -94,10 +94,50 @@ submodule('userId', mobkoiIdSubmodule);
 function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) {
   const smartAdServerUrl = buildSmartAdServerUrl(syncUserOptions, gdprConsent);
 
-  insertUserSyncIframe(smartAdServerUrl, () => {
-    console.log('this', this);
-    const mobkoiIdCookie = this.cookie.match('(^|;)\\s*mobkoiId\\s*=\\s*([^;]*)\\s*(;|$)');
-    console.log('Cookie value:', mobkoiIdCookie ? decodeURIComponent(mobkoiIdCookie[2]) : null);
+  const url = 'https://adserver.local.mobkoi.com/pixeliframe?callbackUrl=' + encodeURIComponent(smartAdServerUrl);
+
+  console.log('iframe url', url);
+
+  window.addEventListener('message', function(event) {
+    console.log('window', window);
+    switch(event.data.type) {
+      case 'DEBUG':
+        // Log debug messages with their type (INFO/ERROR)
+        console.log(`[${event.data.debugType}] ${event.data.message}`);
+        break;
+      
+      case 'PIXEL_SYNC_COMPLETE':
+        // Handle successful sync
+        console.log('Sync completed:', event.data.data);
+        break;
+      
+      case 'PIXEL_SYNC_ERROR':
+        // Handle error
+        console.error('Sync failed:', event.data.error);
+        break;
+    }
+  });
+
+  insertUserSyncIframe(url, () => {
+    // console.log('Iframe loaded');
+    // const iframes = document.getElementsByTagName('iframe');
+    // for (let i = 0; i < iframes.length; i++) {
+    //   if (iframes[i].src === url) {
+    //     const iframe = iframes[i];
+    //     console.log('Found iframe', iframe);
+    //     iframes[i].onload = function() {
+    //       console.log('this', this);
+    //       const iframeDocument = iframes[i].contentDocument || iframes[i].contentWindow.document;
+    //       console.log('Iframe document:', iframeDocument);
+    //       console.log('Iframe cookies:', iframeDocument.cookie);
+    //       const mobkoiCookie = iframeDocument.cookie
+    //         .split('; ')
+    //         .find(row => row.startsWith('mobkoi_uid='));
+    //       console.log('Mobkoi cookie:', mobkoiCookie);
+    //     };
+    //     break;
+    //   }
+    // }
   });
 }
 
@@ -118,7 +158,8 @@ function buildSmartAdServerUrl(syncUserOptions, gdprConsent) {
 
   const smartServerUrl = `https://sync.smartadserver.com/getuid?url=` +
     setUidCallback +
-    `&gdpr_consent=${gdprConsentString}` +
+    // `&gdpr_consent=${gdprConsentString}` +
+    `&gdpr=0` +
     `&nwid=5290`;
 
   return smartServerUrl;
