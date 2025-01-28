@@ -99,27 +99,18 @@ function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) 
   console.log('iframe url', url);
 
   window.addEventListener('message', function(event) {
-    console.log('window', window);
-    switch(event.data.type) {
-      case 'DEBUG':
-        // Log debug messages with their type (INFO/ERROR)
-        console.log(`[${event.data.debugType}] ${event.data.message}`);
-        break;
-      
+    switch (event.data.type) {
       case 'PIXEL_SYNC_COMPLETE':
-        // Handle successful sync
-        console.log('Sync completed:', event.data.data);
+        logInfo('Parent window Sync completed:', event.data.data);
         break;
-      
       case 'PIXEL_SYNC_ERROR':
-        // Handle error
-        console.error('Sync failed:', event.data.error);
+        logError('Parent window Sync failed:', event.data.error);
         break;
     }
   });
 
   insertUserSyncIframe(url, () => {
-    console.log('insertUserSyncIframe loaded');
+    logInfo('insertUserSyncIframe loaded');
     // const iframes = document.getElementsByTagName('iframe');
     // for (let i = 0; i < iframes.length; i++) {
     //   if (iframes[i].src === url) {
