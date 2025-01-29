@@ -12,6 +12,7 @@ import { logError, logInfo, deepAccess, insertUserSyncIframe } from '../src/util
 const GVL_ID = 898;
 const MODULE_NAME = 'mobkoiId';
 const PROD_AD_SERVER_BASE_URL = 'https://adserver.maximus.mobkoi.com';
+const COOKIE_KEY_EQUATIV_SAS_ID = '__mobkoi_sas_id';
 /**
  * !IMPORTANT: This value must match the value in mobkoiAnalyticsAdapter.js
  * The name of the parameter that the publisher can use to specify the ad server endpoint.
@@ -37,29 +38,24 @@ export const mobkoiIdSubmodule = {
       return;
     }
 
-    const cookieName = deepAccess(userSyncOptions, 'storage.name');
-    const existingId = storage.getCookie('mobkoiId');
+    const existingId = storage.getCookie(COOKIE_KEY_EQUATIV_SAS_ID);
 
     if (existingId) {
-      logInfo(`Found ID from local cookie: "${existingId}"`);
-      // return { id: existingId };
+      logInfo(`Found "${COOKIE_KEY_EQUATIV_SAS_ID}" from local cookie: "${existingId}"`);
+      return { id: existingId };
     } else {
-      logInfo(`No ID found in local cookie with name: "${cookieName}"`);
+      logInfo(`Cannot found "${COOKIE_KEY_EQUATIV_SAS_ID}" in local cookie with name.`);
     }
 
     return {
       callback: () => {
-        requestEquativUserId(
+        requestEquativSasId(
           userSyncOptions,
           gdprConsent,
           (userId) => {
             if (userId) {
               logInfo(`Successfully fetched Equativ SAS ID: ${userId}`);
-              storage.setCookie(
-                'mobkoiId',
-                userId,
-                Infinity
-              );
+              storage.setCookie(COOKIE_KEY_EQUATIV_SAS_ID, userId);
             }
           }
         );
@@ -70,7 +66,7 @@ export const mobkoiIdSubmodule = {
 
 submodule('userId', mobkoiIdSubmodule);
 
-function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) {
+function requestEquativSasId(syncUserOptions, gdprConsent, onCompleteCallback) {
   logInfo('Requesting Equativ SAS ID');
 
   const equativPixelUrl = buildEquativPixelUrl(syncUserOptions, gdprConsent);
@@ -86,7 +82,9 @@ function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) 
   window.addEventListener('message', function(event) {
     switch (event.data.type) {
       case 'MOBKOI_PIXEL_SYNC_COMPLETE':
-        logInfo('Parent window Sync completed:', event.data.data);
+        const sasUid = event.data.syncData;
+        logInfo('Parent window Sync completed. SAS ID:', sasUid);
+        onCompleteCallback(sasUid);
         break;
       case 'MOBKOI_PIXEL_SYNC_ERROR':
         logError('Parent window Sync failed:', event.data.error);
@@ -108,7 +106,7 @@ function buildEquativPixelUrl(syncUserOptions, gdprConsent) {
 
   const gdprConsentString = gdprConsent && gdprConsent.gdprApplies ? gdprConsent.consentString : null;
   const smartServerUrl = 'https://sync.smartadserver.com/getuid?' +
-    `url=` + encodeURIComponent(`${adServerBaseUrl}setuid?uid=`) + '[sas_uid]' +
+    `url=` + encodeURIComponent(`${adServerBaseUrl}getPixel?value=`) + '[sas_uid]' +
     // `&gdpr_consent=${gdprConsentString}` +
     `&gdpr=0` +
     `&nwid=5290`;
