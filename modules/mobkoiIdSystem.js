@@ -6,10 +6,8 @@
  */
 
 import { submodule } from '../src/hook.js';
-import { MODULE_TYPE_UID } from '../src/activities/modules.js';
 import { getCoreStorageManager } from '../src/storageManager.js';
-import { createInvisibleIframe, logError, logInfo, deepAccess, insertElement, insertUserSyncIframe, triggerPixel, safeJSONParse, getUnixTimestampFromNow } from '../src/utils.js';
-import { ajax } from '../src/ajax.js';
+import { logError, logInfo, deepAccess, insertUserSyncIframe } from '../src/utils.js';
 
 const GVL_ID = 898;
 const MODULE_NAME = 'mobkoiId';
@@ -72,38 +70,25 @@ export const mobkoiIdSubmodule = {
 
 submodule('userId', mobkoiIdSubmodule);
 
-// function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) {
-//   logInfo('Requesting Equativ SAS ID');
-
-//   const smartAdServerUrl = buildSmartAdServerUrl(syncUserOptions, gdprConsent);
-
-//   triggerPixel(smartAdServerUrl, function () {
-//     logInfo('Equativ Pixel loaded');
-
-//     const mobkoiCookie = this.document.cookie
-//       .split('; ')
-//       .find(row => row.startsWith('mobkoi_uid='));
-
-//     if (mobkoiCookie) {
-//       const userId = mobkoiCookie.split('=')[1];
-//       onCompleteCallback(userId);
-//     }
-//   });
-// }
-
 function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) {
-  const smartAdServerUrl = buildSmartAdServerUrl(syncUserOptions, gdprConsent);
+  logInfo('Requesting Equativ SAS ID');
 
-  const url = 'https://adserver.local.mobkoi.com/pixeliframe?callbackUrl=' + encodeURIComponent(smartAdServerUrl);
+  const equativPixelUrl = buildEquativPixelUrl(syncUserOptions, gdprConsent);
+  logInfo('Equativ SAS ID request URL:', equativPixelUrl);
 
-  console.log('iframe url', url);
+  const url = 'https://adserver.local.mobkoi.com/pixeliframe?' +
+    'pixelUrl=' + encodeURIComponent(equativPixelUrl) +
+    '&cookieName=sas_uid';
 
+  /**
+   * Listen for messages from the iframe
+   */
   window.addEventListener('message', function(event) {
     switch (event.data.type) {
-      case 'PIXEL_SYNC_COMPLETE':
+      case 'MOBKOI_PIXEL_SYNC_COMPLETE':
         logInfo('Parent window Sync completed:', event.data.data);
         break;
-      case 'PIXEL_SYNC_ERROR':
+      case 'MOBKOI_PIXEL_SYNC_ERROR':
         logError('Parent window Sync failed:', event.data.error);
         break;
     }
@@ -111,44 +96,19 @@ function requestEquativUserId(syncUserOptions, gdprConsent, onCompleteCallback) 
 
   insertUserSyncIframe(url, () => {
     logInfo('insertUserSyncIframe loaded');
-    // const iframes = document.getElementsByTagName('iframe');
-    // for (let i = 0; i < iframes.length; i++) {
-    //   if (iframes[i].src === url) {
-    //     const iframe = iframes[i];
-    //     console.log('Found iframe', iframe);
-    //     iframes[i].onload = function() {
-    //       console.log('this', this);
-    //       const iframeDocument = iframes[i].contentDocument || iframes[i].contentWindow.document;
-    //       console.log('Iframe document:', iframeDocument);
-    //       console.log('Iframe cookies:', iframeDocument.cookie);
-    //       const mobkoiCookie = iframeDocument.cookie
-    //         .split('; ')
-    //         .find(row => row.startsWith('mobkoi_uid='));
-    //       console.log('Mobkoi cookie:', mobkoiCookie);
-    //     };
-    //     break;
-    //   }
-    // }
   });
 }
 
-function buildSmartAdServerUrl(syncUserOptions, gdprConsent) {
+/**
+ * Build a pixel URL that will be placed in an iframe to fetch the Equativ SAS ID
+ */
+function buildEquativPixelUrl(syncUserOptions, gdprConsent) {
   logInfo('Generating Equativ SAS ID request URL');
   const adServerBaseUrl = new URL(deepAccess(syncUserOptions, `params.${PARAM_NAME_AD_SERVER_BASE_URL}`) || PROD_AD_SERVER_BASE_URL);
-  const cookieName = deepAccess(syncUserOptions, 'storage.name');
+
   const gdprConsentString = gdprConsent && gdprConsent.gdprApplies ? gdprConsent.consentString : null;
-
-  if (!cookieName) {
-    logError('Equativ SAS ID requires a storage name to be defined');
-    return;
-  }
-
-  const setUidCallback = encodeURIComponent(`${adServerBaseUrl}setuid?`) +
-    encodeURIComponent('uid=') + '[sas_uid]' +
-    encodeURIComponent(`&cookieName=${cookieName}`);
-
-  const smartServerUrl = `https://sync.smartadserver.com/getuid?url=` +
-    setUidCallback +
+  const smartServerUrl = 'https://sync.smartadserver.com/getuid?' +
+    `url=` + encodeURIComponent(`${adServerBaseUrl}setuid?uid=`) + '[sas_uid]' +
     // `&gdpr_consent=${gdprConsentString}` +
     `&gdpr=0` +
     `&nwid=5290`;
