@@ -61,6 +61,7 @@ export const mobkoiIdSubmodule = {
               }
             }
 
+            logInfo(`Fetched Equativ SAS ID: "${sasId}"`);
             storage.setCookie(COOKIE_KEY_EQUATIV_SAS_ID, sasId);
             logInfo(`Stored Equativ SAS ID in local cookie with name: "${COOKIE_KEY_EQUATIV_SAS_ID}"`);
             return {
@@ -116,8 +117,7 @@ function buildEquativPixelUrl(syncUserOptions, gdprConsent) {
   const gdprConsentString = gdprConsent && gdprConsent.gdprApplies ? gdprConsent.consentString : null;
   const smartServerUrl = 'https://sync.smartadserver.com/getuid?' +
     `url=` + encodeURIComponent(`${adServerBaseUrl}getPixel?value=`) + '[sas_uid]' +
-    // `&gdpr_consent=${gdprConsentString}` +
-    `&gdpr=0` +
+    `&gdpr_consent=${gdprConsentString}` +
     `&nwid=5290`;
 
   return smartServerUrl;
