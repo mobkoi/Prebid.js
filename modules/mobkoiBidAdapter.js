@@ -39,7 +39,7 @@ export const converter = ortbConverter({
     deepSetValue(ortbRequest, 'site.publisher.ext.adServerBaseUrl', utils.getAdServerEndpointBaseUrl(prebidBidRequest));
     // We only support one impression per request.
     deepSetValue(ortbRequest, 'imp.0.tagid', utils.getPlacementId(prebidBidRequest));
-    deepSetValue(ortbRequest, 'user.id', context.bidRequests[0].userId.mobkoiId || null);
+    deepSetValue(ortbRequest, 'user.id', context.bidRequests[0].userId?.mobkoiId || null);
 
     return ortbRequest;
   },
