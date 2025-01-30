@@ -31,11 +31,13 @@ export const mobkoiIdSubmodule = {
   gvlid: GVL_ID,
 
   getId(userSyncOptions, gdprConsent) {
-    if (storage.cookiesAreEnabled()) {
-      logInfo('Cookies are enabled', storage);
-    } else {
+    logInfo('Getting Equativ SAS ID');
+
+    if (!storage.cookiesAreEnabled()) {
       logError('Cookies are not enabled. Module will not work.');
-      return;
+      return {
+        id: null
+      };
     }
 
     const existingId = storage.getCookie(COOKIE_KEY_EQUATIV_SAS_ID);
@@ -43,19 +45,26 @@ export const mobkoiIdSubmodule = {
     if (existingId) {
       logInfo(`Found "${COOKIE_KEY_EQUATIV_SAS_ID}" from local cookie: "${existingId}"`);
       return { id: existingId };
-    } else {
-      logInfo(`Cannot found "${COOKIE_KEY_EQUATIV_SAS_ID}" in local cookie with name.`);
     }
 
+    logInfo(`Cannot found "${COOKIE_KEY_EQUATIV_SAS_ID}" in local cookie with name.`);
     return {
       callback: () => {
         requestEquativSasId(
           userSyncOptions,
           gdprConsent,
-          (userId) => {
-            if (userId) {
-              logInfo(`Successfully fetched Equativ SAS ID: ${userId}`);
-              storage.setCookie(COOKIE_KEY_EQUATIV_SAS_ID, userId);
+          (sasId) => {
+            if (!sasId) {
+              logError('Equativ SAS ID is empty');
+              return {
+                id: null
+              }
+            }
+
+            storage.setCookie(COOKIE_KEY_EQUATIV_SAS_ID, sasId);
+            logInfo(`Stored Equativ SAS ID in local cookie with name: "${COOKIE_KEY_EQUATIV_SAS_ID}"`);
+            return {
+              id: sasId
             }
           }
         );
@@ -67,7 +76,7 @@ export const mobkoiIdSubmodule = {
 submodule('userId', mobkoiIdSubmodule);
 
 function requestEquativSasId(syncUserOptions, gdprConsent, onCompleteCallback) {
-  logInfo('Requesting Equativ SAS ID');
+  logInfo('Start requesting Equativ SAS ID');
 
   const equativPixelUrl = buildEquativPixelUrl(syncUserOptions, gdprConsent);
   logInfo('Equativ SAS ID request URL:', equativPixelUrl);
