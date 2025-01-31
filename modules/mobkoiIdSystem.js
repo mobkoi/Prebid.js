@@ -33,7 +33,7 @@ export const mobkoiIdSubmodule = {
   gvlid: GVL_ID,
 
   getId(userSyncOptions, gdprConsent) {
-    logInfo('Getting Equativ SAS ID');
+    logInfo('Getting Equativ SAS ID.');
 
     if (!storage.cookiesAreEnabled()) {
       logError('Cookies are not enabled. Module will not work.');
@@ -80,11 +80,9 @@ submodule('userId', mobkoiIdSubmodule);
 export const utils = {
   requestEquativSasId(syncUserOptions, gdprConsent, onCompleteCallback) {
     logInfo('Start requesting Equativ SAS ID');
-    const adServerBaseUrl = new URL(
-      deepAccess(
-        syncUserOptions,
-        `params.${PARAM_NAME_AD_SERVER_BASE_URL}`) || PROD_AD_SERVER_BASE_URL
-    );
+    const adServerBaseUrl = deepAccess(
+      syncUserOptions,
+      `params.${PARAM_NAME_AD_SERVER_BASE_URL}`) || PROD_AD_SERVER_BASE_URL;
 
     const equativPixelUrl = utils.buildEquativPixelUrl(syncUserOptions, gdprConsent);
     logInfo('Equativ SAS ID request URL:', equativPixelUrl);
@@ -123,15 +121,14 @@ export const utils = {
    */
   buildEquativPixelUrl(syncUserOptions, gdprConsent) {
     logInfo('Generating Equativ SAS ID request URL');
-    const adServerBaseUrl = new URL(
+    const adServerBaseUrl =
       deepAccess(
         syncUserOptions,
-        `params.${PARAM_NAME_AD_SERVER_BASE_URL}`) || PROD_AD_SERVER_BASE_URL
-    );
+        `params.${PARAM_NAME_AD_SERVER_BASE_URL}`) || PROD_AD_SERVER_BASE_URL;
 
     const gdprConsentString = gdprConsent && gdprConsent.gdprApplies ? gdprConsent.consentString : '';
     const smartServerUrl = EQUATIV_BASE_URL + '/getuid?' +
-      `url=` + encodeURIComponent(`${adServerBaseUrl}getPixel?value=`) + '[sas_uid]' +
+      `url=` + encodeURIComponent(`${adServerBaseUrl}/getPixel?value=`) + '[sas_uid]' +
       `&gdpr_consent=${gdprConsentString}` +
       `&nwid=${EQUATIV_NETWORK_ID}`;
 
