@@ -105,6 +105,7 @@ export const utils = {
           break;
         case 'MOBKOI_PIXEL_SYNC_ERROR':
           logError('Parent window Sync failed:', event.data.error);
+          onCompleteCallback(null);
           break;
       }
     });
