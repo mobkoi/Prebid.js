@@ -268,7 +268,7 @@ export const utils = {
       CREATIVE_ID: ortbBidResponse.crid,
       CAMPAIGN_ID: ortbBidResponse.cid,
       ORTB_ID: ortbBidResponse.id,
-      PUBLISHER_ID: deepAccess(context, 'bidRequest.ortb2.site.publisher.id') || deepAccess(context, 'bidderRequest.ortb2.site.publisher.id')
+      PUBLISHER_ID: utils.getPublisherId(context.bidderRequest),
     };
 
     _each(ORTB_RESPONSE_FIELDS_SUPPORT_MACROS, ortbField => {
