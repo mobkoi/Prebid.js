@@ -12,7 +12,8 @@ pbjs.setConfig({
             name: 'mobkoiId',
             storage: {
                 name : 'mobkoi_uid',
-                type : 'cookie'
+                type : 'cookie',
+                expires : 30
             }
         }]
     }
