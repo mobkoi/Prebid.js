@@ -12,7 +12,6 @@ import { logError, logInfo, deepAccess, insertUserSyncIframe } from '../src/util
 const GVL_ID = 898;
 const MODULE_NAME = 'mobkoiId';
 export const PROD_AD_SERVER_BASE_URL = 'https://adserver.maximus.mobkoi.com';
-export const COOKIE_KEY_EQUATIV_SAS_ID = '__mobkoi_sas_id';
 export const EQUATIV_BASE_URL = 'https://sync.smartadserver.com';
 export const EQUATIV_NETWORK_ID = '5290';
 /**
@@ -42,14 +41,22 @@ export const mobkoiIdSubmodule = {
       };
     }
 
-    const existingId = storage.getCookie(COOKIE_KEY_EQUATIV_SAS_ID);
+    const storageName = userSyncOptions && userSyncOptions.storage && userSyncOptions.storage.name;
+    if (!storageName) {
+      logError('Storage name is not defined. Module will not work.');
+      return {
+        id: null
+      };
+    }
+
+    const existingId = storage.getCookie(storageName);
 
     if (existingId) {
-      logInfo(`Found "${COOKIE_KEY_EQUATIV_SAS_ID}" from local cookie: "${existingId}"`);
+      logInfo(`Found "${storageName}" from local cookie: "${existingId}"`);
       return { id: existingId };
     }
 
-    logInfo(`Cannot found "${COOKIE_KEY_EQUATIV_SAS_ID}" in local cookie with name.`);
+    logInfo(`Cannot found "${storageName}" in local cookie with name.`);
     return {
       callback: () => {
         return new Promise((resolve, _reject) => {
@@ -64,8 +71,8 @@ export const mobkoiIdSubmodule = {
               }
 
               logInfo(`Fetched Equativ SAS ID: "${sasId}"`);
-              storage.setCookie(COOKIE_KEY_EQUATIV_SAS_ID, sasId, userSyncOptions.storage.expires);
-              logInfo(`Stored Equativ SAS ID in local cookie with name: "${COOKIE_KEY_EQUATIV_SAS_ID}"`);
+              storage.setCookie(storageName, sasId, userSyncOptions.storage.expires);
+              logInfo(`Stored Equativ SAS ID in local cookie with name: "${storageName}"`);
               resolve({ id: sasId });
             }
           );

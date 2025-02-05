@@ -50,9 +50,17 @@ describe('mobkoiIdSystem', function () {
   });
 
   describe('getId', function () {
+    const userSyncOptions = {
+      storage: {
+        type: 'cookie',
+        name: '_mobkoi_Id',
+        expires: 30, // days
+      }
+    };
+
     it('should return null id if cookies are not enabled', function () {
       cookiesAreEnabledStub.returns(false);
-      const result = mobkoiIdSubmodule.getId();
+      const result = mobkoiIdSubmodule.getId(userSyncOptions);
       expect(result).to.deep.equal({ id: null });
     });
 
@@ -60,7 +68,7 @@ describe('mobkoiIdSystem', function () {
       const testId = 'existing-id';
       cookiesAreEnabledStub.returns(true);
       getCookieStub.returns(testId);
-      const result = mobkoiIdSubmodule.getId();
+      const result = mobkoiIdSubmodule.getId(userSyncOptions);
 
       expect(result).to.deep.equal({ id: testId });
     });
@@ -68,7 +76,7 @@ describe('mobkoiIdSystem', function () {
     it('should return a callback function if id is not available in cookie', function () {
       cookiesAreEnabledStub.returns(true);
       getCookieStub.returns(null);
-      const result = mobkoiIdSubmodule.getId();
+      const result = mobkoiIdSubmodule.getId(userSyncOptions);
 
       expect(result).to.have.property('callback').that.is.a('function');
     });
@@ -83,7 +91,7 @@ describe('mobkoiIdSystem', function () {
           return TEST_SAS_ID;
         });
 
-      const callback = mobkoiIdSubmodule.getId().callback;
+      const callback = mobkoiIdSubmodule.getId(userSyncOptions).callback;
       return callback().then(result => {
         expect(setCookieStub.calledOnce).to.be.true;
         expect(result).to.deep.equal({ id: TEST_SAS_ID });
