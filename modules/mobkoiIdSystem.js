@@ -64,7 +64,7 @@ export const mobkoiIdSubmodule = {
               }
 
               logInfo(`Fetched Equativ SAS ID: "${sasId}"`);
-              storage.setCookie(COOKIE_KEY_EQUATIV_SAS_ID, sasId);
+              storage.setCookie(COOKIE_KEY_EQUATIV_SAS_ID, sasId, userSyncOptions.storage.expires);
               logInfo(`Stored Equativ SAS ID in local cookie with name: "${COOKIE_KEY_EQUATIV_SAS_ID}"`);
               resolve({ id: sasId });
             }
