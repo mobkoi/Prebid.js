@@ -13,7 +13,6 @@ const PUBLISHER_PARAMS = {
    * The name of the parameter that the publisher can use to specify the ad server endpoint.
    */
   PARAM_NAME_AD_SERVER_BASE_URL: 'adServerBaseUrl',
-  PARAM_NAME_PUBLISHER_ID: 'publisherId',
   PARAM_NAME_PLACEMENT_ID: 'placementId',
 }
 
@@ -35,7 +34,6 @@ export const converter = ortbConverter({
     const prebidBidRequest = context.bidRequests[0];
 
     ortbRequest.id = utils.getOrtbId(prebidBidRequest);
-    deepSetValue(ortbRequest, 'site.publisher.id', utils.getPublisherId(prebidBidRequest));
     deepSetValue(ortbRequest, 'site.publisher.ext.adServerBaseUrl', utils.getAdServerEndpointBaseUrl(prebidBidRequest));
     // We only support one impression per request.
     deepSetValue(ortbRequest, 'imp.0.tagid', utils.getPlacementId(prebidBidRequest));
@@ -61,16 +59,6 @@ export const spec = {
    * Determines whether or not the given bid request is valid.
    */
   isBidRequestValid(bid) {
-    if (
-      !deepAccess(bid, `params.${PUBLISHER_PARAMS.PARAM_NAME_PUBLISHER_ID}`) &&
-      !deepAccess(bid, 'ortb2.site.publisher.id')
-    ) {
-      logError(`The ${PUBLISHER_PARAMS.PARAM_NAME_PUBLISHER_ID} field is required in the bid request. ` +
-        'Please follow the setup guideline to set the publisher ID field.'
-      );
-      return false;
-    }
-
     if (
       !deepAccess(bid, `params.${PUBLISHER_PARAMS.PARAM_NAME_PLACEMENT_ID}`)
     ) {
@@ -177,43 +165,6 @@ export const utils = {
   },
 
   /**
-   * !IMPORTANT: Make sure the implementation of this function matches utils.getPublisherId in
-   * both adapters.
-   * Extract the publisher ID from the given object.
-   * @param {*} prebidBidRequestOrOrtbBidRequest
-   * @returns string
-   * @throws {Error} If the publisher ID is not found in the given object.
-   */
-  getPublisherId: function (prebidBidRequestOrOrtbBidRequest) {
-    // Fields that would be automatically set if the publisher set it
-    // via pbjs.setBidderConfig.
-    const ortbPath = 'site.publisher.id';
-    const prebidPath = `ortb2.${ortbPath}`;
-
-    // Fields that would be set by the publisher in the bid
-    // configuration object in ad unit.
-    const paramPath = 'params.publisherId';
-    const bidRequestFirstBidParam = `bids.0.${paramPath}`;
-
-    const publisherId =
-      deepAccess(prebidBidRequestOrOrtbBidRequest, paramPath) ||
-      deepAccess(prebidBidRequestOrOrtbBidRequest, bidRequestFirstBidParam) ||
-      deepAccess(prebidBidRequestOrOrtbBidRequest, prebidPath) ||
-      deepAccess(prebidBidRequestOrOrtbBidRequest, ortbPath);
-
-    if (!publisherId) {
-      throw new Error(
-        'Failed to obtain publisher ID from the given object. ' +
-        `Please set it via the "${prebidPath}" field with pbjs.setBidderConfig.\n` +
-        'Given object:\n' +
-        JSON.stringify({functionParam: prebidBidRequestOrOrtbBidRequest}, null, 3)
-      );
-    }
-
-    return publisherId;
-  },
-
-  /**
    * !IMPORTANT: Make sure the implementation of this function matches utils.getOrtbId in
    * mobkoiAnalyticsAdapter.js.
    * We use the bidderRequestId as the ortbId. We could do so because we only
@@ -268,7 +219,6 @@ export const utils = {
       CREATIVE_ID: ortbBidResponse.crid,
       CAMPAIGN_ID: ortbBidResponse.cid,
       ORTB_ID: ortbBidResponse.id,
-      PUBLISHER_ID: utils.getPublisherId(context.bidderRequest),
     };
 
     _each(ORTB_RESPONSE_FIELDS_SUPPORT_MACROS, ortbField => {
