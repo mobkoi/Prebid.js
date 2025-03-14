@@ -1,7 +1,7 @@
 import { ortbConverter } from '../libraries/ortbConverter/converter.js';
 import { registerBidder } from '../src/adapters/bidderFactory.js';
 import { BANNER } from '../src/mediaTypes.js';
-import { _each, replaceMacros, deepAccess, deepSetValue, logError } from '../src/utils.js';
+import { deepAccess, deepSetValue, logError } from '../src/utils.js';
 
 const BIDDER_CODE = 'mobkoi';
 const GVL_ID = 898;
@@ -15,14 +15,6 @@ const PUBLISHER_PARAMS = {
   PARAM_NAME_AD_SERVER_BASE_URL: 'adServerBaseUrl',
   PARAM_NAME_PLACEMENT_ID: 'placementId',
 }
-
-/**
- * The list of ORTB response fields that are used in the macros. Field
- * replacement is self-implemented in the adapter. Use dot-notated path for
- * nested fields. For example, 'ad.ext.adomain'. For more information, visit
- * https://www.npmjs.com/package/dset and https://www.npmjs.com/package/dlv.
- */
-const ORTB_RESPONSE_FIELDS_SUPPORT_MACROS = ['adm', 'nurl', 'lurl'];
 
 export const converter = ortbConverter({
   context: {
@@ -42,8 +34,6 @@ export const converter = ortbConverter({
     return ortbRequest;
   },
   bidResponse(buildPrebidBidResponse, ortbBidResponse, context) {
-    utils.replaceAllMacrosInPlace(ortbBidResponse, context);
-
     const prebidBid = buildPrebidBidResponse(ortbBidResponse, context);
     utils.addCustomFieldsToPrebidBidResponse(prebidBid, ortbBidResponse);
     return prebidBid;
@@ -204,29 +194,5 @@ export const utils = {
   addCustomFieldsToPrebidBidResponse(prebidBidResponse, ortbBidResponse) {
     prebidBidResponse.ortbBidResponse = ortbBidResponse;
     prebidBidResponse.ortbId = ortbBidResponse.id;
-  },
-
-  replaceAllMacrosInPlace(ortbBidResponse, context) {
-    const macros = {
-      // ORTB macros
-      AUCTION_PRICE: ortbBidResponse.price,
-      AUCTION_IMP_ID: ortbBidResponse.impid,
-      AUCTION_CURRENCY: ortbBidResponse.cur,
-      AUCTION_BID_ID: context.bidderRequest.auctionId,
-
-      // Custom macros
-      BIDDING_API_BASE_URL: utils.getAdServerEndpointBaseUrl(context.bidderRequest),
-      CREATIVE_ID: ortbBidResponse.crid,
-      CAMPAIGN_ID: ortbBidResponse.cid,
-      ORTB_ID: ortbBidResponse.id,
-    };
-
-    _each(ORTB_RESPONSE_FIELDS_SUPPORT_MACROS, ortbField => {
-      deepSetValue(
-        ortbBidResponse,
-        ortbField,
-        replaceMacros(deepAccess(ortbBidResponse, ortbField), macros)
-      );
-    });
   },
 }
