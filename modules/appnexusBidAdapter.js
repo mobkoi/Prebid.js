@@ -354,18 +354,23 @@ export const spec = {
 
     if (bidRequests[0].userId) {
       let eids = [];
-      bidRequests[0].userIdAsEids.forEach(eid => {
-        if (!eid || !eid.uids || eid.uids.length < 1) { return; }
-        eid.uids.forEach(uid => {
-          let tmp = {'source': eid.source, 'id': uid.id};
-          if (eid.source == 'adserver.org') {
-            tmp.rti_partner = 'TDID';
-          } else if (eid.source == 'uidapi.com') {
-            tmp.rti_partner = 'UID2';
-          }
-          eids.push(tmp);
+      const processEids = (uids) => {
+        uids.forEach(eid => {
+          if (!eid || !eid.uids || eid.uids.length < 1) { return; }
+          eid.uids.forEach(uid => {
+            let tmp = {'source': eid.source, 'id': uid.id};
+            if (eid.source == 'adserver.org') {
+              tmp.rti_partner = 'TDID';
+            } else if (eid.source == 'uidapi.com') {
+              tmp.rti_partner = 'UID2';
+            }
+            eids.push(tmp);
+          });
         });
-      });
+      }
+      if (bidRequests[0].userIdAsEids) {
+        processEids(bidRequests[0].userIdAsEids);
+      }
       if (eids.length) {
         payload.eids = eids;
       }
@@ -710,6 +715,7 @@ function newBid(serverBid, rtbBid, bidderRequest) {
 
     // Custom fields
     bid[NATIVE].ext = {
+      video: nativeAd.video,
       customImage1: nativeAd.image1 && {
         url: nativeAd.image1.url,
         height: nativeAd.image1.height,
@@ -1088,7 +1094,7 @@ function getContextFromPlacement(ortbPlacement) {
 }
 
 function getContextFromStartDelay(ortbStartDelay) {
-  if (!ortbStartDelay) {
+  if (typeof ortbStartDelay === 'undefined') {
     return;
   }
 

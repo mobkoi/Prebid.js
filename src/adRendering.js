@@ -1,12 +1,11 @@
 import {
   createIframe,
   createInvisibleIframe,
-  deepAccess,
   inIframe,
   insertElement,
   logError,
   logWarn,
-  replaceMacros
+  replaceMacros, triggerPixel
 } from './utils.js';
 import * as events from './events.js';
 import {AD_RENDER_FAILED_REASON, BID_STATUS, EVENTS, MESSAGES, PB_LOCATOR} from './constants.js';
@@ -17,20 +16,24 @@ import {auctionManager} from './auctionManager.js';
 import {getCreativeRenderer} from './creativeRenderers.js';
 import {hook} from './hook.js';
 import {fireNativeTrackers} from './native.js';
-import {GreedyPromise} from './utils/promise.js';
+import {PbPromise} from './utils/promise.js';
 import adapterManager from './adapterManager.js';
 import {useMetrics} from './utils/perfMetrics.js';
+import {filters} from './targeting.js';
+import {EVENT_TYPE_WIN, parseEventTrackers, TRACKER_METHOD_IMG} from './eventTrackers.js';
 
-const { AD_RENDER_FAILED, AD_RENDER_SUCCEEDED, STALE_RENDER, BID_WON } = EVENTS;
+const { AD_RENDER_FAILED, AD_RENDER_SUCCEEDED, STALE_RENDER, BID_WON, EXPIRED_RENDER } = EVENTS;
 const { EXCEPTION } = AD_RENDER_FAILED_REASON;
 
-export const getBidToRender = hook('sync', function (adId, forRender = true, override = GreedyPromise.resolve()) {
+export const getBidToRender = hook('sync', function (adId, forRender = true, override = PbPromise.resolve()) {
   return override
     .then(bid => bid ?? auctionManager.findBidByAdId(adId))
     .catch(() => {})
 })
 
 export const markWinningBid = hook('sync', function (bid) {
+  (parseEventTrackers(bid.eventtrackers)[EVENT_TYPE_WIN]?.[TRACKER_METHOD_IMG] || [])
+    .forEach(url => triggerPixel(url));
   events.emit(BID_WON, bid);
   auctionManager.addWinningBid(bid);
 })
@@ -137,11 +140,12 @@ export const getRenderingData = hook('sync', function (bidResponse, options) {
   };
 })
 
-export const doRender = hook('sync', function({renderFn, resizeFn, bidResponse, options}) {
-  if (FEATURES.VIDEO && bidResponse.mediaType === VIDEO) {
+export const doRender = hook('sync', function({renderFn, resizeFn, bidResponse, options, doc, isMainDocument = doc === document && !inIframe()}) {
+  const videoBid = (FEATURES.VIDEO && bidResponse.mediaType === VIDEO)
+  if (isMainDocument || videoBid) {
     emitAdRenderFail({
       reason: AD_RENDER_FAILED_REASON.PREVENT_WRITING_ON_MAIN_DOCUMENT,
-      message: 'Cannot render video ad',
+      message: videoBid ? 'Cannot render video ad without a renderer' : `renderAd was prevented from writing to the main document.`,
       bid: bidResponse,
       id: bidResponse.adId
     });
@@ -180,10 +184,18 @@ export function handleRender({renderFn, resizeFn, adId, options, bidResponse, do
     if (bidResponse.status === BID_STATUS.RENDERED) {
       logWarn(`Ad id ${adId} has been rendered before`);
       events.emit(STALE_RENDER, bidResponse);
-      if (deepAccess(config.getConfig('auctionOptions'), 'suppressStaleRender')) {
+      if (config.getConfig('auctionOptions')?.suppressStaleRender) {
         return;
       }
     }
+    if (!filters.isBidNotExpired(bidResponse)) {
+      logWarn(`Ad id ${adId} has been expired`);
+      events.emit(EXPIRED_RENDER, bidResponse);
+      if (config.getConfig('auctionOptions')?.suppressExpiredRender) {
+        return;
+      }
+    }
+
     try {
       doRender({renderFn, resizeFn, bidResponse, options, doc});
     } catch (e) {
@@ -254,7 +266,7 @@ export function renderAdDirect(doc, adId, options) {
     if (adData.ad) {
       doc.write(adData.ad);
       doc.close();
-      emitAdRenderSucceeded({doc, bid, adId: bid.adId});
+      emitAdRenderSucceeded({doc, bid, id: bid.adId});
     } else {
       getCreativeRenderer(bid)
         .then(render => render(adData, {
@@ -262,7 +274,7 @@ export function renderAdDirect(doc, adId, options) {
           mkFrame: createIframe,
         }, doc.defaultView))
         .then(
-          () => emitAdRenderSucceeded({doc, bid, adId: bid.adId}),
+          () => emitAdRenderSucceeded({doc, bid, id: bid.adId}),
           (e) => {
             fail(e?.reason || AD_RENDER_FAILED_REASON.EXCEPTION, e?.message)
             e?.stack && logError(e);
@@ -277,14 +289,10 @@ export function renderAdDirect(doc, adId, options) {
     if (!adId || !doc) {
       fail(AD_RENDER_FAILED_REASON.MISSING_DOC_OR_ADID, `missing ${adId ? 'doc' : 'adId'}`);
     } else {
-      if ((doc === document && !inIframe())) {
-        fail(AD_RENDER_FAILED_REASON.PREVENT_WRITING_ON_MAIN_DOCUMENT, `renderAd was prevented from writing to the main document.`);
-      } else {
-        getBidToRender(adId).then(bidResponse => {
-          bid = bidResponse;
-          handleRender({renderFn, resizeFn, adId, options: {clickUrl: options?.clickThrough}, bidResponse, doc});
-        });
-      }
+      getBidToRender(adId).then(bidResponse => {
+        bid = bidResponse;
+        handleRender({renderFn, resizeFn, adId, options: {clickUrl: options?.clickThrough}, bidResponse, doc});
+      });
     }
   } catch (e) {
     fail(EXCEPTION, e.message);

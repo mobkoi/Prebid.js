@@ -25,12 +25,11 @@ export const storage = getStorageManager({ moduleType: MODULE_TYPE_UID, moduleNa
 
 export const mobkoiIdSubmodule = {
   name: MODULE_NAME,
+  gvlid: GVL_ID,
 
   decode(value) {
     return value ? { [MODULE_NAME]: value } : undefined;
   },
-
-  gvlid: GVL_ID,
 
   getId(userSyncOptions, gdprConsent) {
     logInfo('Getting Equativ SAS ID.');

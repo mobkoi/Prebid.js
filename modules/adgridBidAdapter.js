@@ -1,14 +1,14 @@
 import { _each, isEmpty, deepAccess } from '../src/utils.js';
 import { config } from '../src/config.js';
 import { registerBidder } from '../src/adapters/bidderFactory.js';
-import { BANNER } from '../src/mediaTypes.js';
+import { BANNER, VIDEO } from '../src/mediaTypes.js';
 
 const BIDDER = Object.freeze({
   CODE: 'adgrid',
   HOST: 'https://api-prebid.adgrid.io',
   REQUEST_METHOD: 'POST',
   REQUEST_ENDPOINT: '/api/v1/auction',
-  SUPPORTED_MEDIA_TYPES: [BANNER],
+  SUPPORTED_MEDIA_TYPES: [BANNER, VIDEO],
 });
 
 const CURRENCY = Object.freeze({
@@ -132,9 +132,18 @@ function interpretResponse(response, bidRequest) {
       creativeId: adUnit.creativeId,
       netRevenue: true,
       currency: adUnit.currency || bidRequest.currency,
-      mediaType: adUnit.mediaType,
-      ad: adUnit.ad,
+      mediaType: adUnit.mediaType
     };
+
+    if (adUnit.mediaType == 'video') {
+      if (adUnit.admUrl) {
+        bidResponse.vastUrl = adUnit.admUrl;
+      } else {
+        bidResponse.vastXml = adUnit.adm;
+      }
+    } else {
+      bidResponse.ad = adUnit.ad;
+    }
 
     bidResponses.push(bidResponse);
   });
@@ -158,18 +167,39 @@ function getBidData(bid) {
     if (bid.mediaTypes.banner != null) {
       bidData.mediaType = 'banner';
       bidData.sizes = bid.mediaTypes.banner.sizes;
+    } else if (bid.mediaTypes.video != null) {
+      bidData.mediaType = 'video';
+      bidData.sizes = bid.mediaTypes.video.playerSize;
+      bidData.videoData = bid.mediaTypes.video;
+      bidData.videoParams = bid.params.video;
     }
   }
 
   return bidData;
 }
 
+/**
+ * Register the user sync pixels/iframe which should be dropped after the auction.
+ */
+function getUserSyncs(syncOptions, response, gdprConsent, uspConsent) {
+  if (typeof response !== 'object' || response === null || response.length === 0) {
+    return [];
+  }
+
+  if (response[0]?.body?.ext?.cookies && typeof response[0].body.ext.cookies === 'object') {
+    return response[0].body.ext.cookies.slice(0, 5);
+  } else {
+    return [];
+  }
+};
+
 export const spec = {
   code: BIDDER.CODE,
   isBidRequestValid,
   buildRequests,
   interpretResponse,
-  supportedMediaTypes: BIDDER.SUPPORTED_MEDIA_TYPES
+  supportedMediaTypes: BIDDER.SUPPORTED_MEDIA_TYPES,
+  getUserSyncs
 };
 
 registerBidder(spec);
